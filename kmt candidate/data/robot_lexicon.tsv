@@ -1,0 +1,3 @@
+# local_word<TAB>english_word. Extra words the robot parser should understand. SAFETY-CRITICAL: have native speakers verify.
+# 'stop' and other stop words are checked BEFORE anything else, in every language, so add every way to say stop.
+stɔp	stop

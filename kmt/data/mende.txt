@@ -1,0 +1,1 @@
+# no extra monolingual mende text yet; the mende side of each parallel pair is also used as monolingual text

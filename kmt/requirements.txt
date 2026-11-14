@@ -1,0 +1,1 @@
+numpy>=1.24   # developed and tested on NumPy 2.4 / Python 3.12

@@ -1,0 +1,1 @@
+local teacher=qwen2.5-coder:7b; verified arithmetic only; output=C:\Users\desmo\Downloads\Summit AI\kmt\runs\distillation

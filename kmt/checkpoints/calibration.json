@@ -1,0 +1,44 @@
+{
+  "default": 1.01,
+  "target_chrf": 0.5,
+  "directions": {
+    "krio>en": {
+      "min_conf": 1.01,
+      "n": 29,
+      "mean_chrf_all": 0.096,
+      "mean_chrf_trusted": null,
+      "note": "never trusted: target not reached at any confidence"
+    },
+    "en>krio": {
+      "min_conf": 1.01,
+      "n": 29,
+      "mean_chrf_all": 0.096,
+      "mean_chrf_trusted": null,
+      "note": "never trusted: target not reached at any confidence"
+    },
+    "mende>en": {
+      "min_conf": 1.01,
+      "n": 207,
+      "mean_chrf_all": 0.122,
+      "mean_chrf_trusted": null,
+      "note": "never trusted: target not reached at any confidence"
+    },
+    "en>mende": {
+      "min_conf": 1.01,
+      "n": 207,
+      "mean_chrf_all": 0.076,
+      "mean_chrf_trusted": null,
+      "note": "never trusted: target not reached at any confidence"
+    },
+    "temne>en": {
+      "min_conf": 1.01,
+      "n": 7,
+      "note": "too few held-out examples to calibrate"
+    },
+    "en>temne": {
+      "min_conf": 1.01,
+      "n": 7,
+      "note": "too few held-out examples to calibrate"
+    }
+  }
+}

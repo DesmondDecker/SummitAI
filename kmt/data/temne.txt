@@ -1,0 +1,1 @@
+# no extra monolingual temne text yet; the temne side of each parallel pair is also used as monolingual text
