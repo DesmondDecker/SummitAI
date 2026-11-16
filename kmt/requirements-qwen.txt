@@ -1,0 +1,8 @@
+# Optional Qwen3 runtime and LoRA fine-tuning environment.
+# Install into a dedicated virtual environment; the NumPy-only legacy path is unchanged.
+torch>=2.7,<3
+transformers>=4.51,<5
+peft>=0.15,<1
+accelerate>=1.6,<2
+safetensors>=0.5,<1
+datasets>=3,<5

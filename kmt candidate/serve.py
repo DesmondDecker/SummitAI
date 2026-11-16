@@ -8,7 +8,32 @@ POST /v1/robot/stop                                            emergency stop (s
 GET  /health   GET /metrics
 format = json | text | markdown | xml | csv   (query string ?format= or body field)
 Standard library only. Stateless apart from bounded in-memory sessions, so you can run many copies behind a load balancer."""
-import argparse, collections, hmac, json, os, re, sys, threading, time, traceback
+import mimetypes
+from pathlib import Path
+
+    def _serve_static(self, rel_path: str, content_type: str = None):
+        """Serve a file from the ./static directory.
+        rel_path – path relative to the static folder (e.g. "index.html").
+        If content_type is None we guess based on the file suffix.
+        """
+        static_root = Path(__file__).parent / "static"
+        file_path = static_root / rel_path
+        if not file_path.is_file():
+            return self._err(404, f"Static file {rel_path!r} not found", fmt)
+        if content_type is None:
+            content_type, _ = mimetypes.guess_type(str(file_path))
+            if content_type is None:
+                content_type = "application/octet-stream"
+        with open(file_path, "rb") as f:
+            data = f.read()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+        self.status = 200
+        return
+
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 from kmt.assistant import Assistant
@@ -18,6 +43,18 @@ from kmt.dialogue import Dialogue
 from kmt.formats import FORMATS, render
 from kmt.robot import RobotController, SimRobot
 from kmt.session import SessionManager
+from voice import stt, tts
+
+# ---------------------------------------------------------------------------
+# Generate an introductory audio file (once) using the TTS helper.
+# ---------------------------------------------------------------------------
+import os
+INTRO_TEXT = "Hello, I am Summit AI. I provide multilingual language identification, translation lookup, and robot command simulation."
+intro_path = os.path.join(os.path.dirname(__file__), "static", "intro.wav")
+if not os.path.isfile(intro_path):
+    os.makedirs(os.path.dirname(intro_path), exist_ok=True)
+    tts(INTRO_TEXT, out_path=intro_path)
+
 
 SID = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
 
@@ -156,7 +193,13 @@ class Handler(BaseHTTPRequestHandler):
         return v
 
     # ---- dispatch -----------------------------------------------------
-    def do_GET(self):
+        def do_GET(self):
+        # Serve static files (root page and intro audio) before other routes
+        if self.path in ("/", "/index.html"):
+            return self._serve_static("index.html")
+        if self.path == "/intro.wav":
+            return self._serve_static("intro.wav")
+        self._handle("GET")
         self._handle("GET")
 
     def do_POST(self):
@@ -209,6 +252,95 @@ class Handler(BaseHTTPRequestHandler):
             app.metrics.record(path if path.startswith(("/v1", "/health", "/metrics")) else "other", self.status, (time.perf_counter() - t0) * 1000)
 
     def _route(self, path, body, fmt):
+        app = self.server.app
+        # ---- new audio endpoint -------------------------------------------------
+        if path == "/v1/audio":
+            # Expect raw 16kHz mono PCM WAV data in the request body.
+            # The body has already been read into *body* (as dict) for JSON routes,
+            # but for binary we need to read directly from the underlying stream.
+            # We'll re‑read the raw payload using the Content‑Length header.
+            # This block bypasses the usual JSON parsing because the client
+            # sends a binary wav file.
+            try:
+                n = int(self.headers.get("Content-Length", "0"))
+                if n == 0:
+                    return self._err(411, "Content-Length required", fmt)
+                raw = self.rfile.read(n)
+                # Write to a temporary file so the STT/TTS helpers can work with a path.
+                import tempfile, os
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+                    tmp.write(raw)
+                    tmp_path = tmp.name
+                # Speech‑to‑text (offline or online depending on VOICE_MODE)
+                text = stt(tmp_path)
+                os.remove(tmp_path)
+                # Re‑use the existing chat logic – we call the same function that
+                # the /v1/chat endpoint uses.  The Assistant is accessible via
+                # app.dialogue.bot (or app.bot in older code).  Here we call the
+                # dialogue directly for consistency.
+                # Create a temporary session ID for this audio call.
+                sid = f"audio-{self.client_address[0]}-{int(time.time())}"
+                # Use the same default task handling as chat – "auto".
+                r = app.dialogue.respond(text, sid, "auto", None, None, None)
+                reply_text = r.get("text") or r.get("response") or ""
+                # Text‑to‑speech (offline/online)
+                wav_out = tts(reply_text)
+                # Return the generated wav as binary response (Content‑Type: audio/wav)
+                with open(wav_out, "rb") as f:
+                    wav_bytes = f.read()
+                # Clean up the generated file
+                os.remove(wav_out)
+                # Send binary response – we bypass render() because it expects JSON.
+                self.send_response(200)
+                self.send_header("Content-Type", "audio/wav")
+                self.send_header("Content-Length", str(len(wav_bytes)))
+                self.end_headers()
+                self.wfile.write(wav_bytes)
+                self.status = 200
+                return
+            except Exception as exc:
+                # Log server‑side error but return generic message to client.
+                traceback.print_exc(file=sys.stderr)
+                return self._err(500, f"audio processing error: {exc}", fmt)
+        # ---- existing routes ---------------------------------------------------
+        app = self.server.app
+        if path == "/v1/correct":
+            f = {k: self._text(body, k, fmt) for k in ("src_lang", "src", "tgt_lang", "tgt")}
+            if any(v is None for v in f.values()):
+                return
+            rec = dict(task="translate", **f)
+            if app.accept_corrections:
+                with app.write_lock:
+                    app.bot.correct_translation(f["src_lang"], f["src"], f["tgt_lang"], f["tgt"])
+                app.cache.clear()
+                return self._send(200, dict(status="applied"), fmt)
+            feedback_append(app.pending_path, rec)
+            return self._send(202, dict(status="queued_for_review"), fmt)
+        text = self._text(body, "text", fmt)
+        if text is None:
+            return
+        if path == "/v1/identify":
+            key = ("id", text); r = app.cache.get(key)
+            if r is None:
+                best, probs = app.bot.identify(text)
+                r = dict(lang=best, probabilities={k: round(v, 4) for k, v in probs.items()}); app.cache.put(key, r)
+            return self._send(200, r, fmt)
+        if path == "/v1/translate":
+            src, tgt = body.get("src"), body.get("tgt", "en")
+            key = ("tr", text, src, tgt); r = app.cache.get(key); hit = r is not None
+            if r is None:
+                res = app.bot.translate(text, src, tgt)
+                r = dict(text=res["text"], **{k: res[k] for k in ("src_lang", "tgt_lang", "source", "confidence", "warning", "chunks", "alternatives", "suggestions", "matched", "match") if k in res})
+                app.cache.put(key, r)
+            return self._send(200, dict(r, cached=hit), fmt)
+        sid = body.get("session", f"anon-{self.client_address[0]}")
+        if not isinstance(sid, str) or not SID.match(sid):
+            return self._err(400, "'session' must be 1-64 characters of letters, digits, _ . : -", fmt)
+        task = body.get("task", "auto")
+        if task not in ("auto", "translate", "ask", "identify", "robot", "remember"):
+            return self._err(400, "unknown task", fmt)
+        r = app.dialogue.respond(text, sid, task, body.get("lang"), body.get("src"), body.get("tgt"))
+        self._send(200, r, fmt)
         app = self.server.app
         if path == "/v1/correct":
             f = {k: self._text(body, k, fmt) for k in ("src_lang", "src", "tgt_lang", "tgt")}

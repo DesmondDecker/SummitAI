@@ -309,6 +309,7 @@ def test_memory_scales_and_matches_exactly():
 def test_distillation_rejects_unverified_teacher_steps():
     from kmt.distillation import OllamaTeacher, make_expressions, validate_solution
     from tools.teach import _expected_record, _read_pairs
+    from unittest import mock
     expressions = make_expressions(12, 19)
     assert expressions == make_expressions(12, 19) and len(set(expressions)) == 12
     expression = "(8 + 4) * 3"
@@ -320,6 +321,19 @@ def test_distillation_rejects_unverified_teacher_steps():
         raise AssertionError("unrelated teacher steps were accepted")
     except ValueError:
         pass
+    teacher = OllamaTeacher()
+    attempts = []
+
+    def intermittent_failure(expressions):
+        attempts.append(expressions)
+        if len(attempts) < 3:
+            raise RuntimeError("temporary local teacher timeout")
+        return [_expected_record(expression) for expression in expressions]
+
+    teacher._solve_batch = intermittent_failure
+    with mock.patch("kmt.distillation.time.sleep"):
+        assert teacher.solve([expression]) == [_expected_record(expression)]
+    assert len(attempts) == 3
     try:
         OllamaTeacher(url="http://example.com")
         raise AssertionError("remote teacher endpoint was accepted")
@@ -332,6 +346,196 @@ def test_distillation_rejects_unverified_teacher_steps():
             out.write("restricted\tEnglish\tjw_krio\t1.00\n")
             out.write("low quality\tEnglish\tpeacecorps_mende\t0.30\n")
         assert _read_pairs(path) == [("safe", "English")]
+
+
+def test_qwen_data_splits_and_response_only_mask():
+    from tools.prepare_qwen_data import (_valid_message, conversation_examples, local_translation_examples,
+                                        split_examples)
+    from tools.train_qwen_lora import encode_example
+
+    class FakeTokenizer:
+        def apply_chat_template(self, messages, tokenize=True, add_generation_prompt=False):
+            ids = [1]
+            for message in messages:
+                ids.append({"system": 2, "user": 3, "assistant": 4}[message["role"]])
+                ids.extend([10 + ord(char) % 50 for char in message["content"]])
+            if add_generation_prompt:
+                ids.append(4)
+            return ids
+
+    encoded = encode_example(FakeTokenizer(), {"messages": [
+        {"role": "user", "content": "hello"}, {"role": "assistant", "content": "hi"},
+    ]}, max_length=1000)
+    first_target = next(i for i, label in enumerate(encoded["labels"]) if label != -100)
+    assert first_target > 0 and all(label == -100 for label in encoded["labels"][:first_target])
+    accepted = {"lang": "en", "role": "assistant", "text": "answer", "tree_state": "ready_for_export",
+                "labels": {"spam": {"value": 0}, "pii": {"value": 0}}}
+    assert _valid_message(accepted)
+    assert not _valid_message({**accepted, "tree_state": "halted_by_moderator"})
+    assert not _valid_message({**accepted, "labels": {"pii": {"value": 1}}})
+    tree = [
+        {"message_id": "u", "message_tree_id": "tree", "parent_id": None, "role": "prompter",
+         "lang": "en", "text": "Question one", "_hf_split": "train"},
+        {"message_id": "a", "message_tree_id": "tree", "parent_id": "u", "role": "assistant",
+         "lang": "en", "text": "Answer one", "_hf_split": "train"},
+        {"message_id": "u2", "message_tree_id": "tree", "parent_id": "a", "role": "prompter",
+         "lang": "en", "text": "Question two", "_hf_split": "validation"},
+        {"message_id": "a2", "message_tree_id": "tree", "parent_id": "u2", "role": "assistant",
+         "lang": "en", "text": "Answer two", "_hf_split": "validation"},
+    ]
+    oasst_splits = split_examples(conversation_examples(tree))
+    assert len(oasst_splits["test"]) == 2 and not oasst_splits["train"] and not oasst_splits["validation"]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        for split in ("parallel", "heldout"):
+            os.makedirs(f"{tmp}/{split}")
+        open(f"{tmp}/parallel/krio-en.tsv", "w", encoding="utf-8").write(
+            "a yu\tHow are you?\tpeacecorps_krio\t0.60\n"
+            "restricted\tbad\tjw_krio\t1.00\n"
+            "low\tquality\tpeacecorps_mende\t0.30\n")
+        open(f"{tmp}/heldout/krio-en.tsv", "w", encoding="utf-8").write(
+            "aw yu du?\tHow are you?\tpeacecorps_krio\t0.60\n")
+        examples, counts = local_translation_examples(tmp)
+        assert counts == {"train": 2, "test": 2}
+        assert all("restricted" not in str(row) for row in examples)
+        splits = split_examples(examples)
+        assert len(splits["train"]) == 2 and len(splits["test"]) == 2 and not splits["validation"]
+
+
+def test_qwen_local_runtime_and_distillation_gates():
+    from kmt.qwen_runtime import DEFAULT_SYSTEM, normalize_messages, trim_history
+    from tools.distill_qwen import teacher_answer
+    from tools.evaluate_qwen import token_f1
+    from tools.train_qwen_lora import load_approved_teacher_rows
+    import json
+
+    turns = normalize_messages([{"role": "user", "content": "Hi"}], None)
+    assert turns[0] == {"role": "system", "content": DEFAULT_SYSTEM}
+    trimmed = trim_history([turns[0], {"role": "user", "content": "old"},
+                            {"role": "assistant", "content": "old answer"},
+                            {"role": "user", "content": "latest"}], lambda rows: len(rows), 3)
+    assert [row["role"] for row in trimmed] == ["system", "user"]
+    assert token_f1("a b c", "b c d") == 2 / 3
+    try:
+        teacher_answer([{"role": "user", "content": "hi"}], "model", "https://example.com")
+        raise AssertionError("remote teacher endpoint was accepted")
+    except ValueError:
+        pass
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "teacher.jsonl")
+        rows = [
+            {"review_status": "pending", "messages": []},
+            {"review_status": "approved", "messages": [
+                {"role": "user", "content": "q"}, {"role": "assistant", "content": "a"}]},
+        ]
+        with open(path, "w", encoding="utf-8") as out:
+            out.write("\n".join(json.dumps(row) for row in rows) + "\n")
+        assert len(load_approved_teacher_rows(path, 1)) == 1
+        assert load_approved_teacher_rows(path, 0) == []
+
+
+def test_qwen_verified_arithmetic_curriculum_and_math_eval():
+    import json
+    from kmt.distillation import canonical_solution, make_expressions
+    from tools.generate_verified_arithmetic import EVAL_COUNT, EVAL_SEED, generate_rows
+    from tools.evaluate_qwen import ARITHMETIC_REGRESSION_ANSWER, evaluate_arithmetic
+    from tools.qwen_training_loop import _publish_adapter, promotion_decision
+    from tools.train_qwen_lora import estimate_parameter_count, load_approved_teacher_rows
+    from kmt.qwen_runtime import resolve_adapter_path
+    from types import SimpleNamespace
+
+    class Teacher:
+        model = "local-test-teacher"
+
+        def solve(self, expressions):
+            return [canonical_solution(expression) for expression in expressions]
+
+    reserved = set(make_expressions(EVAL_COUNT, EVAL_SEED))
+    rows = generate_rows(Teacher(), 5, 123, reserved, set())
+    assert len(rows) == 5
+    assert all(row["review_status"] == "approved" for row in rows)
+    assert all(row["verification"]["expression"] not in reserved for row in rows)
+    assert len({row["group_id"] for row in rows}) == 5
+
+    class PerfectRuntime:
+        def respond(self, messages, max_new_tokens):
+            expression = messages[0]["content"].split("Evaluate exactly: ", 1)[1].splitlines()[0]
+            if expression == "67897644457 * 1235656768979":
+                return f"Answer: {ARITHMETIC_REGRESSION_ANSWER}"
+            solution = canonical_solution(expression)
+            steps = "\n".join(
+                f"Step {index}: {step}" for index, step in enumerate(solution["steps"], 1)
+            )
+            return f"{steps}\nAnswer: {solution['answer']}"
+
+    scores = evaluate_arithmetic(PerfectRuntime(), 4)
+    assert scores["examples"] == 5
+    assert scores["exact_answer_accuracy"] == 1
+    assert scores["valid_step_accuracy"] == 1
+    assert scores["large_number_regression"]["correct"]
+
+    config = SimpleNamespace(
+        hidden_size=2560, num_hidden_layers=36, vocab_size=151936,
+        intermediate_size=9728, num_attention_heads=32,
+        num_key_value_heads=8, head_dim=128, tie_word_embeddings=True,
+    )
+    assert estimate_parameter_count(config) > 3_000_000_000
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "teacher.jsonl")
+        unsafe_rows = [
+            *rows,
+            {"review_status": "approved", "messages": ["malformed"]},
+            {"review_status": "pending", "messages": [
+                {"role": "user", "content": "q"}, {"role": "assistant", "content": "a"}]},
+        ]
+        with open(path, "w", encoding="utf-8") as target:
+            target.writelines(json.dumps(row) + "\n" for row in unsafe_rows)
+        assert len(load_approved_teacher_rows(path, 20)) == 5
+
+    before = {
+        "arithmetic_reasoning": {
+            "exact_answer_accuracy": 0.5,
+            "valid_step_accuracy": 0.4,
+            "large_number_regression": {"correct": False},
+        },
+        "heldout_conversation": {"token_f1": 0.7},
+        "translation_chrF": {"krio": {"chrF": 0.2}},
+    }
+    improved = {
+        "arithmetic_reasoning": {
+            "exact_answer_accuracy": 0.6,
+            "valid_step_accuracy": 0.4,
+            "large_number_regression": {"correct": True},
+        },
+        "heldout_conversation": {"token_f1": 0.69},
+        "translation_chrF": {"krio": {"chrF": 0.19}},
+    }
+    assert promotion_decision(before, improved) == (True, [])
+    regressed = {**improved, "translation_chrF": {"krio": {"chrF": 0.1}}}
+    accepted, reasons = promotion_decision(before, regressed)
+    assert not accepted and any("translation" in reason for reason in reasons)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        output = os.path.join(tmp, "student")
+        adapter = os.path.join(output, "candidates", "cycle-0001", "adapter")
+        os.makedirs(adapter)
+        args = SimpleNamespace(
+            base_model_id="Qwen/Qwen3-4B", base_revision="rev",
+            base_license="Apache-2.0", parameter_count=4022468096,
+        )
+        _publish_adapter(output, adapter, args, improved, 1)
+        assert resolve_adapter_path(output) == os.path.realpath(adapter)
+        with open(os.path.join(output, "active.json"), encoding="utf-8") as source:
+            pointer = json.load(source)
+        pointer["adapter"] = "..\\outside"
+        with open(os.path.join(output, "active.json"), "w", encoding="utf-8") as target:
+            json.dump(pointer, target)
+        try:
+            resolve_adapter_path(output)
+            raise AssertionError("adapter pointer escaped its model directory")
+        except ValueError:
+            pass
 
 
 def test_bible_alignment_tool():
@@ -366,5 +570,7 @@ if __name__ == "__main__":
               test_assistant_survives_hostile_input, test_assistant_memory_persists_and_newest_correction_wins,
               test_assistant_abstains_when_calibration_says_untrusted, test_lookup_canonical_keys_alternatives_and_quality, test_lookup_did_you_mean_and_short_word_rules, test_seeding_skips_low_quality_entries, test_gloss_lookup_from_dictionary_entries, test_assistant_detects_mismatched_files, test_checkpoint_roundtrip_is_exact_and_atomic,
               test_memory_scales_and_matches_exactly, test_distillation_rejects_unverified_teacher_steps,
+              test_qwen_data_splits_and_response_only_mask, test_qwen_local_runtime_and_distillation_gates,
+              test_qwen_verified_arithmetic_curriculum_and_math_eval,
               test_bible_alignment_tool):
         f(); print("passed", f.__name__)

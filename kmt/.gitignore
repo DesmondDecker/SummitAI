@@ -1,0 +1,8 @@
+.venv-qwen/
+.venv/
+__pycache__/
+*.py[cod]
+models/
+outputs/
+data_qwen/
+memory/qwen_history.json

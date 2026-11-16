@@ -3,6 +3,7 @@ import ast
 import json
 import random
 import re
+import time
 import urllib.error
 import urllib.request
 from urllib.parse import urlsplit
@@ -122,7 +123,7 @@ class OllamaTeacher:
             "messages": [{"role": "user", "content": prompt}],
             "format": schema,
             "stream": False,
-            "options": {"temperature": 0, "num_predict": max(256, len(expressions) * 96)},
+            "options": {"temperature": 0, "num_predict": max(64, min(256, len(expressions) * 32))},
         }).encode("utf-8")
         request = urllib.request.Request(
             self.url + "/api/chat", data=body, method="POST",
@@ -151,12 +152,21 @@ class OllamaTeacher:
 
     def solve(self, expressions):
         try:
-            return self._solve_batch(expressions)
+            return self._solve_with_retry(expressions)
         except ValueError:
             solutions = []
             for expression in expressions:
                 try:
-                    solutions.extend(self._solve_batch([expression]))
+                    solutions.extend(self._solve_with_retry([expression]))
                 except ValueError:
                     continue
             return solutions
+
+    def _solve_with_retry(self, expressions, attempts=3):
+        for attempt in range(attempts):
+            try:
+                return self._solve_batch(expressions)
+            except RuntimeError:
+                if attempt + 1 == attempts:
+                    raise
+                time.sleep(2 ** attempt)

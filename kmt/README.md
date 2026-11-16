@@ -254,9 +254,78 @@ New-Item -ItemType File runs/distillation/STOP
 To continue a run after the STOP file is consumed, remove that file before restarting. Teacher prompts and training stay local;
 the teacher URL is restricted to localhost. `--rounds` defaults to 1; background mode is opt-in, not an always-on service.
 
+## Qwen Foundation Migration
+The optional Qwen path is separate from the NumPy baseline. It uses official
+[Qwen3-0.6B-Base](https://huggingface.co/Qwen/Qwen3-0.6B-Base) weights (Apache-2.0), the compatible Qwen architecture, and
+the Qwen tokenizer. The legacy `checkpoints/` and `checkpoints_krio/` are not converted or overwritten. A Summit LoRA adapter
+is a Qwen-derived model, not a model trained from scratch. Qwen3 Base is pretrained-only; conversation behavior requires SFT.
+
+### Install and Download
+This CPU-only environment supports local smoke tests; training on this integrated-graphics PC will be slow. The base checkpoint
+is about 1.2 GB. Run from the `kmt` directory:
+```powershell
+python -m venv .venv-qwen
+.\.venv-qwen\Scripts\python.exe -m pip install -r requirements-qwen-cpu.txt
+hf download Qwen/Qwen3-0.6B-Base --max-workers 1 --local-dir "$env:LOCALAPPDATA\SummitAI\models\Qwen3-0.6B-Base"
+```
+For practical LoRA training, use a CUDA GPU environment and install `requirements-qwen.txt` there.
+
+### Data and Training
+The builder records Hub revisions/licenses in `data_qwen/manifest.json`, filters OASST2 to accepted English messages, preserves
+conversation trees in deterministic train/validation/test splits, and includes only quality-screened local translation pairs
+from allowlisted Peace Corps, Migeod, and syllabus sources. Restricted JW Krio, van de Vate, and third-party vocabulary entries
+are excluded. Verify rights for government-produced manuals in your jurisdiction before redistribution.
+```powershell
+.\.venv-qwen\Scripts\python.exe tools\prepare_qwen_data.py --out data_qwen
+.\.venv-qwen\Scripts\python.exe tools\train_qwen_lora.py --base-model "$env:LOCALAPPDATA\SummitAI\models\Qwen3-0.6B-Base" --data data_qwen --output outputs\summit-qwen3-0.6b-lora --max-steps 100
+.\.venv-qwen\Scripts\python.exe tools\evaluate_qwen.py --model "$env:LOCALAPPDATA\SummitAI\models\Qwen3-0.6B-Base" --adapter outputs\summit-qwen3-0.6b-lora\adapter --out outputs\summit-qwen3-0.6b-lora\evaluation.json
+```
+The trainer masks user/system tokens, trains only on assistant output, saves LoRA adapters separately, and logs validation loss.
+It does not train on the test split or modify the base model. The checked-in local corpus contains no verified Krio conversation
+benchmark; native-speaker review is needed before claiming Krio gains.
+
+### Qwen3-4B student training
+The approved larger student is the official `Qwen/Qwen3-4B` checkpoint (4,022,468,096 parameters; Apache-2.0), not the
+legacy NumPy model. The installed local `qwen2.5-coder:7b` is used only as a teacher through Ollama on loopback. The first
+automatic curriculum is limited to two-operation integer arithmetic: teacher answers are accepted only after an exact local
+integer/AST verifier agrees. Its 48 fixed arithmetic evaluation expressions are excluded from generated training rows.
+Other reasoning, code, cultural, and Krio teacher outputs are not auto-approved by this curriculum.
+
+The Qwen trainer updates Summit LoRA adapter weights while the 4B base remains frozen. The manifest records the true base
+parameter count and the adapter's trainable parameter count. This is a Qwen-derived Summit student, not a 4B model trained
+from scratch. A CUDA GPU is required for 3B/4B fine-tuning; the trainer refuses to load a billion-parameter base on CPU.
+
+Download the approved base into a local model directory (the model card and Apache-2.0 license are retained alongside it):
+```powershell
+hf download Qwen/Qwen3-4B --local-dir "$env:USERPROFILE\SummitAI\models\Qwen3-4B" --max-workers 1
+```
+
+Generate one bounded batch without student training, or run one bounded training/evaluation cycle on a CUDA machine:
+```powershell
+.\.venv-qwen\Scripts\python.exe tools\qwen_training_loop.py --base-model "$env:USERPROFILE\SummitAI\models\Qwen3-4B" --generate-only
+.\.venv-qwen\Scripts\python.exe tools\qwen_training_loop.py --base-model "$env:USERPROFILE\SummitAI\models\Qwen3-4B"
+```
+
+For a bounded continuous run, use `--continuous --max-cycles 100 --interval 3600`. The worker writes truthful state to
+`runs/qwen3-4b/status.json`, training output to `runs/qwen3-4b/worker.log`, verified arithmetic rows to
+`data_qwen/teacher_verified.jsonl`, and immutable candidate adapters under `outputs/summit-qwen3-4b/candidates/`.
+It atomically updates `outputs/summit-qwen3-4b/active.json` only if arithmetic improves without unacceptable regressions
+on held-out conversation, language translation, or the large-number arithmetic test. `PAUSE` pauses between cycles;
+`STOP` stops at a cycle boundary. Remove `PAUSE` to resume, and intentionally remove `STOP` before starting a new run.
+This is a worker/status file, not yet a graphical dashboard or an auto-start Windows service.
+
+### Run the Local Model
+```powershell
+.\.venv-qwen\Scripts\python.exe chat_qwen.py --model "$env:LOCALAPPDATA\SummitAI\models\Qwen3-0.6B-Base" --adapter outputs\summit-qwen3-0.6b-lora\adapter
+.\.venv-qwen\Scripts\python.exe serve.py --backend qwen --qwen-model "$env:LOCALAPPDATA\SummitAI\models\Qwen3-0.6B-Base" --qwen-adapter outputs\summit-qwen3-0.6b-lora\adapter --api-key YOUR_LOCAL_KEY
+```
+The CLI stores recent local turns in `memory/qwen_history.json`; `/reset` clears them. The service uses its existing session manager.
+Qwen runs locally and is opt-in; translation lookup, language tools, session handling, and robot safety remain Summit features.
+The current report records the legacy baseline only. `evaluate_qwen.py` measures held-out chat overlap and translation chrF;
+coding and Sierra Leone cultural benchmarks remain explicitly unmeasured until licensed tests are supplied.
+
 ## What this cannot be
-It is a small specialist, not a general assistant. Its ceiling is set by your data: thousands of clean native-speaker lines
-per language for language ID and Krio, and real parallel pairs for Mende/Temne translation. It will not have the world
-knowledge or broad reasoning of a large model. Distillation currently targets arithmetic only and cannot transfer Qwen's weights
-or general capabilities. Toy results (~100%) come from tiny, regular synthetic languages and say nothing
-about real-language accuracy. Back-translation is unverified here and can amplify errors; spot-check its output.
+The NumPy baseline remains a small specialist. The optional Qwen3 path adds a pretrained base and Summit-specific adapter, but
+does not convert Qwen weights into the legacy architecture or guarantee reasoning/translation quality. The existing arithmetic
+distillation trial showed no held-out improvement. Toy results (~100%) come from tiny synthetic languages and say nothing about
+real-language accuracy. Back-translation is unverified here and can amplify errors; spot-check its output.

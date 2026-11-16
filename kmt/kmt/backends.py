@@ -56,3 +56,22 @@ class AnthropicBackend(Backend):
             return "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
         except Exception as e:                                 # network, HTTP error, bad JSON: never crash the caller
             raise BackendError(f"{type(e).__name__}: {e}") from e
+
+
+class LocalQwenBackend(Backend):
+    """Loads Summit's local Qwen base checkpoint (and optional Summit LoRA) for runtime chat."""
+    name = "qwen-local"
+    answer_all = True
+
+    def __init__(self, model_path, adapter_path=None, device="auto"):
+        from .qwen_runtime import QwenRuntime
+        try:
+            self.runtime = QwenRuntime(model_path, adapter_path, device)
+        except Exception as exc:
+            raise BackendError(f"cannot load local Qwen model: {exc}") from exc
+
+    def complete(self, messages, system=None, max_tokens=512):
+        try:
+            return self.runtime.respond(messages, system=system, max_new_tokens=max_tokens)
+        except Exception as exc:
+            raise BackendError(f"local Qwen inference failed: {exc}") from exc

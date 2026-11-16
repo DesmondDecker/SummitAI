@@ -69,6 +69,8 @@ class Dialogue:
         first = text.split()[0].lower().strip(",.!")
         if text.endswith("?") or first in _WH or first in _ASKVERBS:
             return self._ask(s, text, lang)
+        if self.backend is not None and getattr(self.backend, "answer_all", False):
+            return self._ask(s, text, lang)
         known = [l for l in s.langs if l != "en"]
         tgt_l = "en" if lang != "en" else (known[-1] if known else None)
         if tgt_l is None:

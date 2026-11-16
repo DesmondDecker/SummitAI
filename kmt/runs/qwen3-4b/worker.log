@@ -1,0 +1,78 @@
+
+[2026-11-16T09:51:07.688005+00:00] $ C:\Users\desmo\Downloads\Summit AI\kmt\.venv-qwen\Scripts\python.exe C:\Users\desmo\Downloads\Summit AI\kmt\tools\generate_verified_arithmetic.py --model qwen2.5-coder:7b --ollama-url http://127.0.0.1:11434 --output C:\Users\desmo\Downloads\Summit AI\kmt\data_qwen\teacher_verified.jsonl --examples 64 --seed 20261117 --max-queue-size 20000
+appended 64 exact-verified arithmetic examples to C:\Users\desmo\Downloads\Summit AI\kmt\data_qwen\teacher_verified.jsonl
+
+[2026-11-16T11:03:09.896420+00:00] $ C:\Users\desmo\Downloads\Summit AI\kmt\.venv-qwen\Scripts\python.exe C:\Users\desmo\Downloads\Summit AI\kmt\tools\generate_verified_arithmetic.py --model qwen2.5-coder:7b --ollama-url http://127.0.0.1:11434 --output C:\Users\desmo\Downloads\Summit AI\kmt\data_qwen\teacher_verified.jsonl --examples 64 --seed 20261118 --max-queue-size 20000
+appended 64 exact-verified arithmetic examples to C:\Users\desmo\Downloads\Summit AI\kmt\data_qwen\teacher_verified.jsonl
+
+[2026-11-16T12:42:40.075049+00:00] $ C:\Users\desmo\Downloads\Summit AI\kmt\.venv-qwen\Scripts\python.exe C:\Users\desmo\Downloads\Summit AI\kmt\tools\generate_verified_arithmetic.py --model qwen2.5-coder:7b --ollama-url http://127.0.0.1:11434 --output C:\Users\desmo\Downloads\Summit AI\kmt\data_qwen\teacher_verified.jsonl --examples 64 --seed 20261119 --max-queue-size 20000
+Traceback (most recent call last):
+  File "C:\Users\desmo\Downloads\Summit AI\kmt\kmt\distillation.py", line 154, in solve
+    return self._solve_batch(expressions)
+           ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\desmo\Downloads\Summit AI\kmt\kmt\distillation.py", line 148, in _solve_batch
+    return [validate_solution(expression, by_expression[expression]) for expression in expressions]
+            ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\desmo\Downloads\Summit AI\kmt\kmt\distillation.py", line 82, in validate_solution
+    raise ValueError("teacher final answer does not match the expression")
+ValueError: teacher final answer does not match the expression
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\desmo\Downloads\Summit AI\kmt\kmt\distillation.py", line 132, in _solve_batch
+    with urllib.request.urlopen(request, timeout=self.timeout) as response:
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3824.0_x64__qbz5n2kfra8p0\Lib\urllib\request.py", line 189, in urlopen
+    return opener.open(url, data, timeout)
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3824.0_x64__qbz5n2kfra8p0\Lib\urllib\request.py", line 489, in open
+    response = self._open(req, data)
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3824.0_x64__qbz5n2kfra8p0\Lib\urllib\request.py", line 506, in _open
+    result = self._call_chain(self.handle_open, protocol, protocol +
+                              '_open', req)
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3824.0_x64__qbz5n2kfra8p0\Lib\urllib\request.py", line 466, in _call_chain
+    result = func(*args)
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3824.0_x64__qbz5n2kfra8p0\Lib\urllib\request.py", line 1348, in http_open
+    return self.do_open(http.client.HTTPConnection, req)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3824.0_x64__qbz5n2kfra8p0\Lib\urllib\request.py", line 1323, in do_open
+    r = h.getresponse()
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3824.0_x64__qbz5n2kfra8p0\Lib\http\client.py", line 1459, in getresponse
+    response.begin()
+    ~~~~~~~~~~~~~~^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3824.0_x64__qbz5n2kfra8p0\Lib\http\client.py", line 336, in begin
+    version, status, reason = self._read_status()
+                              ~~~~~~~~~~~~~~~~~^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3824.0_x64__qbz5n2kfra8p0\Lib\http\client.py", line 297, in _read_status
+    line = str(self.fp.readline(_MAXLINE + 1), "iso-8859-1")
+               ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3824.0_x64__qbz5n2kfra8p0\Lib\socket.py", line 723, in readinto
+    return self._sock.recv_into(b)
+           ~~~~~~~~~~~~~~~~~~~~^^^
+TimeoutError: timed out
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\desmo\Downloads\Summit AI\kmt\tools\generate_verified_arithmetic.py", line 132, in <module>
+    main()
+    ~~~~^^
+  File "C:\Users\desmo\Downloads\Summit AI\kmt\tools\generate_verified_arithmetic.py", line 119, in main
+    rows = generate_rows(teacher, args.examples, args.seed, reserved, existing)
+  File "C:\Users\desmo\Downloads\Summit AI\kmt\tools\generate_verified_arithmetic.py", line 90, in generate_rows
+    solutions = teacher.solve(expressions[start:start + 8])
+  File "C:\Users\desmo\Downloads\Summit AI\kmt\kmt\distillation.py", line 159, in solve
+    solutions.extend(self._solve_batch([expression]))
+                     ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "C:\Users\desmo\Downloads\Summit AI\kmt\kmt\distillation.py", line 150, in _solve_batch
+    raise RuntimeError(f"local Ollama teacher failed: {exc}") from exc
+RuntimeError: local Ollama teacher failed: timed out
+
+[2026-11-16T13:27:27.288712+00:00] $ C:\Users\desmo\Downloads\Summit AI\kmt\.venv-qwen\Scripts\python.exe C:\Users\desmo\Downloads\Summit AI\kmt\tools\generate_verified_arithmetic.py --model qwen2.5-coder:7b --ollama-url http://127.0.0.1:11434 --output C:\Users\desmo\Downloads\Summit AI\kmt\data_qwen\teacher_verified.jsonl --examples 64 --seed 20261119 --max-queue-size 20000
+
+[2026-11-16T13:52:17.811602+00:00] $ C:\Users\desmo\Downloads\Summit AI\kmt\.venv-qwen\Scripts\python.exe C:\Users\desmo\Downloads\Summit AI\kmt\tools\generate_verified_arithmetic.py --model qwen2.5-coder:7b --ollama-url http://127.0.0.1:11434 --output C:\Users\desmo\Downloads\Summit AI\kmt\data_qwen\teacher_verified.jsonl --examples 64 --seed 20261119 --max-queue-size 20000
+appended 64 exact-verified arithmetic examples to C:\Users\desmo\Downloads\Summit AI\kmt\data_qwen\teacher_verified.jsonl
+
+[2026-11-16T16:56:19.750434+00:00] $ C:\Users\desmo\Downloads\Summit AI\kmt\.venv-qwen\Scripts\python.exe C:\Users\desmo\Downloads\Summit AI\kmt\tools\generate_verified_arithmetic.py --model qwen2.5-coder:7b --ollama-url http://127.0.0.1:11434 --output C:\Users\desmo\Downloads\Summit AI\kmt\data_qwen\teacher_verified.jsonl --examples 64 --seed 20261120 --max-queue-size 20000
+appended 64 exact-verified arithmetic examples to C:\Users\desmo\Downloads\Summit AI\kmt\data_qwen\teacher_verified.jsonl

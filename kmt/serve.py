@@ -12,7 +12,7 @@ import argparse, collections, hmac, json, os, re, sys, threading, time, tracebac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 from kmt.assistant import Assistant
-from kmt.backends import AnthropicBackend
+from kmt.backends import AnthropicBackend, LocalQwenBackend
 from kmt.data import feedback_append, read_tsv
 from kmt.dialogue import Dialogue
 from kmt.formats import FORMATS, render
@@ -91,6 +91,8 @@ class App:
         backend = None
         if a.backend == "anthropic":
             backend = AnthropicBackend()
+        elif a.backend == "qwen":
+            backend = LocalQwenBackend(a.qwen_model, a.qwen_adapter, a.qwen_device)
         self.dialogue = Dialogue(self.bot, robot, backend, SessionManager(a.max_sessions, a.session_ttl), a.max_chars)
         self.robot, self.api_key, self.max_chars, self.max_body = robot, a.api_key, a.max_chars, a.max_body
         self.accept_corrections, self.pending_path = a.accept_corrections, os.path.join(a.memory, "pending_corrections.jsonl")
@@ -267,12 +269,18 @@ def parse_args(argv=None):
     ap.add_argument("--session-ttl", type=int, default=3600); ap.add_argument("--max-chars", type=int, default=2000)
     ap.add_argument("--max-body", type=int, default=16384)
     ap.add_argument("--accept-corrections", action="store_true", help="apply corrections to memory immediately (trusted/private use only)")
-    ap.add_argument("--robot", choices=["none", "sim"], default="none"); ap.add_argument("--backend", choices=["none", "anthropic"], default="none")
+    ap.add_argument("--robot", choices=["none", "sim"], default="none")
+    ap.add_argument("--backend", choices=["none", "anthropic", "qwen"], default="none")
+    ap.add_argument("--qwen-model", default=os.environ.get("SUMMIT_QWEN_MODEL"))
+    ap.add_argument("--qwen-adapter", default=os.environ.get("SUMMIT_QWEN_ADAPTER"))
+    ap.add_argument("--qwen-device", choices=["auto", "cpu", "cuda"], default="auto")
     ap.add_argument("--allow-unauthenticated-robot", action="store_true")
     a = ap.parse_args(argv)
     if a.robot != "none" and not a.api_key and not a.allow_unauthenticated_robot:
         ap.error("robot control requires --api-key (anyone who can reach the server could move the robot); "
                  "use --allow-unauthenticated-robot only on a private test setup")
+    if a.backend == "qwen" and not a.qwen_model:
+        ap.error("--backend qwen requires --qwen-model or SUMMIT_QWEN_MODEL pointing to a local checkpoint")
     return a
 
 

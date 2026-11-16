@@ -142,6 +142,17 @@ def test_dialogue_context_and_safety():
         assert d.respond("", "e")["task"] == "empty"
 
 
+def test_optional_qwen_backend_handles_plain_chat():
+    with tempfile.TemporaryDirectory() as tmp:
+        bot = _tiny_assistant(tmp)
+        backend = MockBackend("Summit response")
+        backend.answer_all = True
+        dialogue = Dialogue(bot, backend=backend)
+        result = dialogue.respond("Hello there", "qwen-session")
+        assert result["source"] == "backend:mock" and result["reply"] == "Summit response"
+        assert backend.calls and backend.calls[0]["messages"][-1]["content"] == "Hello there"
+
+
 class _FakeBot:
     """Stand-in assistant with a scripted 'Krio' phrasebook, to test the translate-then-act safety flow exactly."""
     langs = ["krio", "en"]

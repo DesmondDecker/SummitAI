@@ -1,0 +1,11 @@
+{
+  "state": "waiting",
+  "cycle": 4,
+  "queue_path": "C:\\Users\\desmo\\Downloads\\Summit AI\\kmt\\data_qwen\\teacher_verified.jsonl",
+  "base_model": "Qwen/Qwen3-4B",
+  "parameter_count": 4022468096,
+  "generate_only": true,
+  "updated_utc": "2026-11-16T17:13:09.139524+00:00",
+  "verified_examples": 256,
+  "next_cycle_utc": "2026-11-16T18:13:09.139524+00:00"
+}
