@@ -1,10 +1,10 @@
 # KMT: Krio / Mende / Temne language system: consolidated project report
 
 Everything built in this project, what it does, what was measured, what it cannot do, and what to do next. Numbers are from held-out tests unless stated.
-Python + NumPy only (no PyTorch, no pretrained model). Developed and tested on Linux, Python 3.12, NumPy 2.4.
+The core KMT stack uses Python + NumPy. An optional locally hosted model backend and installable mobile PWA are included; model weights remain external to the repository.
 
 ## 1. Summary in five lines
-* A small from-scratch transformer toolkit (autograd, BPE tokenizer, training, retrieval memory, assistant, HTTP service, simulated-robot command layer) with 40 passing tests.
+* A small from-scratch transformer toolkit (autograd, BPE tokenizer, training, retrieval memory, assistant, HTTP service, simulated-robot command layer) with 47 passing tests.
 * It reliably **identifies** English, Mende and Krio sentences (97-100%); Temne is weaker (76% on short items, 29% on 7 sentences).
 * It **does not translate unseen text reliably** (chrF 0.03-0.29 out of 1), so it refuses to, and answers only from a quality-ranked phrasebook/dictionary memory built from your books.
 * The Krio data you supplied (42k pairs) helped 2-3x but is one religious register with **unconfirmed rights**, so it is quarantined behind a `--release` switch.
@@ -16,7 +16,8 @@ Python + NumPy only (no PyTorch, no pretrained model). Developed and tested on L
 | Language ID (krio / mende / en / temne) | works on sentences; short single words are ambiguous |
 | Phrasebook + dictionary lookup (~8-76k entries), typo-tolerant, "did you mean", alternatives, quality-ranked | works; lookups of the source books, not generalisation |
 | Translating new sentences | **fails** (refuses by design, calibrated on held-out data) |
-| Free conversation, reasoning, coding, voice, images | not available |
+| Free conversation, reasoning, coding, images | core KMT does not provide these; the optional local model backend provides chat |
+| Voice input/output | the PWA supports browser-based English dictation and device read-aloud when available |
 | English robot commands (move/turn/stop...) on a **simulator** | works, safety-tested; local-language commands depend on translation, so not in practice |
 | Question answering from remembered facts | code exists; never trained on real data |
 | HTTP API (chat/translate/identify/correct), 5 output formats, auth, rate limits, caching, correction review queue | works; ~40 req/s model-bound, ~170 req/s cache-heavy on one shared core |
@@ -56,11 +57,11 @@ Both ship a `calibration.json` that makes the assistant abstain when held-out ev
 * Experimental word-by-word gloss: covers 38% of Mende words, 30% of glosses match; off by default.
 * Robot layer: 30,000-utterance fuzz test, stop-always-wins, negation never acted on, translated commands always confirmed; each safety rule was deliberately broken to confirm a test fails.
 * Bugs found and fixed along the way: float32 silently running in float64; infinite recursion on very long words; "yes" being translated instead of confirming a robot command; double-counted held-out pairs; a memory leak in the autograd graph that killed large training runs.
-* Tests: 25 core + 15 service = 40 passing.
+* Tests: 25 core + 22 service = 47 passing, including local-model routing and PWA delivery checks.
 
 ## 6b. Things that need your action
 1. **Rights:** get permission for the religious Krio corpus (or drop it), and for the visitsierraleone and van de Vate material, before any public release.
-2. **Security (outside this project):** both Ministry of Health zips contain `backup_codes.txt` (98 codes that look like real 2FA backup codes) and credential-like lines in code. Rotate them and remove them from the repository.
+2. **Security:** keep local credentials and private development data out of public releases; rotate any credentials that may have been exposed.
 3. **Verification:** have native speakers check `data/KB_REVIEW.tsv` and a sample of lookups; the books were OCR'd and some entries are damaged.
 
 ## 7. Next steps (highest impact first)
@@ -77,8 +78,9 @@ python tools/build_corpus.py            # private full corpus (or add --release)
 python train.py --steps 4000            # train (add --langs krio for a specialist; --resume continues a stopped run)
 python tools/calibrate.py               # decide when translations may be shown
 python evaluate.py ; python tools/eval_translation_by_source.py
-python chat.py                          # interactive (or: python serve.py --api-key KEY)
+python chat.py                          # interactive (or: python serve.py --backend none --api-key KEY)
 ```
+The mobile PWA is served at `/` by `serve.py`. The default backend uses a model already installed in local Ollama and does not require extra Python packages or model downloads. The model stays loaded for ten minutes after a request to speed up follow-up responses. On the development PC, a short warm response took about 1.5 seconds compared with about 14.5 seconds for a cold first request; timings vary by hardware and prompt. The Transformers backend is optional and requires a separately installed local checkpoint. Service tests cover local model routing and PWA delivery; local inference was smoke-tested through Summit's HTTP API. English voice dictation depends on browser speech support, microphone permission and HTTPS or localhost; the browser speech engine may process audio through its own service. Read-aloud uses device voices. Phone installation still needs testing on the target device over HTTPS.
 
 ## 9. File map
 `kmt/` library (autograd, transformer, tokenizer, data, memory, assistant, dialogue, robot, session, formats, backends, evaluate) · `train.py finetune.py evaluate.py chat.py serve.py` ·

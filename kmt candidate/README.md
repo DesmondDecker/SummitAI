@@ -1,6 +1,6 @@
 # KMT: a small AI for Krio, Mende and Temne
 
-A complete language-model system written from scratch on NumPy (no PyTorch, no external model).
+The KMT language toolkit is written from scratch on NumPy. Summit can use a locally hosted language model for general chat.
 
 ```
 text -> BPE tokenizer -> Transformer (own autograd) -> translate / answer / classify / predict
@@ -17,6 +17,25 @@ text -> BPE tokenizer -> Transformer (own autograd) -> translate / answer / clas
 | **Translate** | each language <-> English, beam search, translation memory shortcut |
 | **Remember** | instant retrieval memory of facts and corrected translations |
 | **Learn** | `/fix` a translation -> stored at once -> `finetune.py` teaches the model (with replay against forgetting); `tools/backtranslate.py` creates extra training pairs from plain text |
+
+## Summit mobile PWA and local model routing
+
+The candidate includes a mobile-first installable web app at `/`. Chat and ask requests use the configured local Ollama model by default; translation and language identification remain on the existing KMT phrasebook/language tools. The PWA shell can load offline, but chat needs a live connection to Summit.
+
+The default setup uses a model already installed in Ollama and does **not** download model files or add Python packages:
+
+```powershell
+ollama list
+python serve.py --host 127.0.0.1 --port 8080
+```
+
+Ollama must be running locally at `http://127.0.0.1:11434`; Summit intentionally rejects remote Ollama endpoints. If the configured model is unavailable, chat returns a visible error rather than silently switching models. The local model stays loaded for ten minutes after a request to speed up follow-up responses; this uses the model's normal local memory while it is loaded. On the development PC, a short warm response took about 1.5 seconds compared with about 14.5 seconds for a cold first request; actual latency depends on the device and prompt.
+
+An optional Transformers-based local runtime is also available for compatible checkpoints; see `python serve.py --help` for backend options. It is not needed for the default Ollama setup.
+
+The mobile app supports English voice dictation and read-aloud using browser/device speech APIs, with no added packages or downloads. Dictation requires microphone permission and a supported browser on HTTPS or localhost; the browser's speech engine may process audio through its own service. Only the text you choose to send is sent to Summit. Read-aloud starts only when you tap a reply's button and uses an available device voice.
+
+Open `http://127.0.0.1:8080` on the same device to test. For a phone, host Summit on a reachable machine and use HTTPS; install from Chrome's install prompt or Safari's Add to Home Screen flow. Do not expose the development server directly to the internet. Put TLS and suitable authentication in front of it. If the API key option is enabled, enter it in Connection settings; the PWA keeps it only for the current browser tab.
 
 ## Upgrades in this version, with what was actually measured
 | Upgrade | Result (measured here) |
@@ -157,11 +176,13 @@ data. Their licences and origins are unknown, so none were used; they would matt
 
 ## Serving, context, formats and the robot layer (new)
 ```
-python serve.py --ckpt checkpoints --port 8080 --api-key SECRET            # plain HTTP: put TLS (nginx/Caddy) in front
-python serve.py ... --robot sim                                             # simulated robot; REQUIRES --api-key
+python serve.py --host 127.0.0.1 --port 8080                                 # local Ollama model is the default
+python serve.py --backend none --host 127.0.0.1 --port 8080                 # API/UI work without a chat model
+python serve.py --help                                                       # see local backend options
+python serve.py ... --robot sim --api-key SECRET                             # simulated robot; REQUIRES --api-key
 python tools/loadtest.py --port 8080 --clients 8 --requests 100
 ```
-Endpoints: `POST /v1/chat` (context-aware routing), `/v1/translate`, `/v1/identify`, `/v1/correct`, `/v1/robot/stop`, `GET /health`, `/metrics`.
+Endpoints: PWA `GET /`; `POST /v1/chat` (context-aware routing), `/v1/translate`, `/v1/identify`, `/v1/correct`, `/v1/robot/stop`, `GET /health`, `/metrics`.
 Every reply can be `json`, `text`, `markdown`, `xml` or `csv` (`?format=`); Markdown/XML output is escaped so replies cannot inject markup.
 
 **Measured service speed** (one shared CPU core, 8 concurrent clients, plain stdlib HTTP server, ~0.7 M-parameter model):
@@ -178,10 +199,7 @@ default** (`--accept-corrections` applies them at once; leave it off for a publi
 **"Context aware" means:** per-session language, remembered facts, the last translation (so "and in Mende?" works), pending confirmations, and
 recent history for the optional large-model backend. It does not give the small model deep reasoning or long-range memory.
 
-**"Complex issues" are escalated, not solved locally.** The small model only does extractive lookup over facts it is given. Questions that look hard
-(why/explain/compare/plan, long or multi-part) go to an optional large-model backend (`--backend anthropic`) when configured, and otherwise get an
-honest "I don't have enough information". The backend is OFF by default because it sends user text to a third party; the Anthropic client is
-**not tested here (no network)**, so try it on your machine first. Its answers are never parsed into robot commands.
+**The configured chat model runs locally on the server.** Ordinary chat and questions use the local model; it does not make robot decisions. Explicit translation and identification tasks continue through KMT. The optional Anthropic backend remains available only when selected and configured; it sends user text to a third party.
 
 ### Operating a robot: what this is and is not
 The language model **never produces motor commands**. It may only translate. A small deterministic parser turns English text into one of a few
@@ -210,7 +228,7 @@ kmt/evaluate.py     perplexity, language ID, chrF, QA accuracy, next-token accur
 train.py  finetune.py  evaluate.py  chat.py
 tools/prepare_text.py  tools/make_toy_data.py  tools/backtranslate.py  tools/build_corpus.py  tools/calibrate.py
 tools/twocol.py  tools/clean.py  tools/ocr_pages.py  tools/extract_migeod.py  tools/extract_krio_manual.py  tools/extract_peacecorps_dialogues.py  tools/extract_interlinear.py
-tests/test_all.py + tests/test_service.py   40 tests: service, robot fuzzing, dialogue, gradients, causality, cached==uncached decoding, float32, robustness, memory, Bible tool
+tests/test_all.py + tests/test_service.py   47 tests: service, robot fuzzing, dialogue, gradients, causality, cached==uncached decoding, float32, robustness, memory, Bible tool
 tools/bible_align.py  verse-align a local-language Bible with an English one (USFM or plain text), holds out whole books
 ```
 
@@ -225,6 +243,8 @@ python evaluate.py --data toy_data --ckpt toy_ckpt
 Real data (see `data/README.md`): `python train.py --steps 6000`, then `python evaluate.py`, then `python chat.py`.
 Chat commands: plain text (auto-translate), `/tr krio>en ...`, `/ask ...`, `/next ...`, `/score ...`, `/intent ...`,
 `/id ...`, `/gen krio ...`, `/remember ...`, `/fix <correct translation>`.
+
+The mobile PWA and local model server use the separate setup above; the NumPy-only quick start does not install model runtimes or weights.
 
 ## What this cannot be
 It is a small specialist, not a general assistant. Its ceiling is set by your data: thousands of clean native-speaker lines

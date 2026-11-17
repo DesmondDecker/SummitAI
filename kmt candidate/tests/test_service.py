@@ -133,13 +133,132 @@ def test_dialogue_context_and_safety():
         d.respond("go forward 1 meter", "u1"); d.respond("turn left", "u1"); d.respond("stop", "u1")
         assert len(backend.calls) == n                                         # robot traffic is NEVER sent to the backend
         roles = [m["role"] for m in backend.calls[0]["messages"]]
-        assert roles[0] == "user" and all(a != b for a, b in zip(roles, roles[1:]))   # valid alternating history
-        d2 = Dialogue(b, None, MockBackend(fail=True))                         # backend down: degrade gracefully
+        assert roles[0] == "user" and all(a != b for a, b in zip(roles, roles[1:]))
+        d2 = Dialogue(b, None, MockBackend(fail=True))
         r = d2.respond("why is the sky blue and explain", "x")
         assert "warning" in r and "can't answer" in r["reply"]
         assert Dialogue(b, None, None).respond("explain everything about economics", "y")["source"] == "none"
-        assert Dialogue(b, None, None).respond("go forward 1 meter", "z")["task"] != "robot"   # robot off => not a robot request
+        assert Dialogue(b, None, None).respond("go forward 1 meter", "z")["task"] != "robot"
         assert d.respond("", "e")["task"] == "empty"
+
+
+def test_qwen_backend_routes_plain_chat():
+    with tempfile.TemporaryDirectory() as tmp:
+        backend = MockBackend("Summit response")
+        backend.answer_all = True
+        dialogue = Dialogue(_tiny_assistant(tmp), backend=backend)
+        result = dialogue.respond("Hello Summit", "qwen-session")
+        assert result["source"] == "backend:mock"
+        assert result["reply"] == "Summit response"
+        assert backend.calls
+
+
+def test_qwen_default_uses_installed_ollama_model():
+    import serve
+    args = serve.parse_args([])
+    assert args.backend == "qwen"
+    assert args.qwen_model == "custom-qwen:latest"
+    assert serve.parse_args(["--qwen-model", "qwen2.5-coder:7b"]).qwen_model == "qwen2.5-coder:7b"
+
+
+def test_local_qwen_backend_wraps_runtime():
+    from kmt import qwen_runtime
+    from kmt.backends import LocalQwenBackend
+
+    original = qwen_runtime.QwenRuntime
+
+    class StubRuntime:
+        def __init__(self, model_path, adapter_path, device):
+            self.settings = (model_path, adapter_path, device)
+
+        def respond(self, messages, system=None, max_new_tokens=256):
+            return f"{messages[-1]['content']}:{max_new_tokens}"
+
+    try:
+        qwen_runtime.QwenRuntime = StubRuntime
+        backend = LocalQwenBackend("model", "adapter", "cpu")
+        assert backend.name == "qwen-local" and backend.answer_all
+        assert backend.runtime.settings == ("model", "adapter", "cpu")
+        assert backend.complete([{"role": "user", "content": "hello"}], max_tokens=123) == "hello:123"
+    finally:
+        qwen_runtime.QwenRuntime = original
+
+
+def test_ollama_qwen_backend_sends_local_chat_request():
+    from unittest.mock import patch
+    from kmt.backends import OllamaQwenBackend
+
+    backend = OllamaQwenBackend("custom-qwen:latest")
+    response_body = json.dumps({"message": {"content": "Summit is ready."}}).encode()
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return response_body
+
+    with patch("kmt.backends.urllib.request.urlopen", return_value=Response()) as urlopen:
+        result = backend.complete([{"role": "user", "content": "Hello"}], system="Be concise.", max_tokens=80)
+
+    request = urlopen.call_args.args[0]
+    sent = json.loads(request.data)
+    assert result == "Summit is ready."
+    assert request.full_url == "http://127.0.0.1:11434/api/chat"
+    assert sent["model"] == "custom-qwen:latest" and sent["stream"] is False
+    assert sent["messages"] == [
+        {"role": "system", "content": "Be concise."},
+        {"role": "user", "content": "Hello"},
+    ]
+    assert sent["options"]["num_predict"] == 80
+    assert sent["keep_alive"] == "10m"
+
+
+def test_ollama_qwen_backend_rejects_non_local_endpoint():
+    from kmt.backends import BackendError, OllamaQwenBackend
+
+    try:
+        OllamaQwenBackend(url="https://example.com/api/chat")
+        raise AssertionError("non-local Qwen endpoint accepted")
+    except BackendError:
+        pass
+
+
+def test_qwen_runtime_validates_chat_messages_and_trims_history():
+    from kmt.qwen_runtime import DEFAULT_SYSTEM, normalize_messages, trim_history
+
+    messages = normalize_messages([{"role": "user", "content": "Hi"}], None)
+    assert messages[0] == {"role": "system", "content": DEFAULT_SYSTEM}
+    assert trim_history(
+        [messages[0], {"role": "user", "content": "old"}, {"role": "assistant", "content": "reply"},
+         {"role": "user", "content": "latest"}],
+        lambda value: len(value),
+        3,
+    ) == [messages[0], {"role": "user", "content": "latest"}]
+
+
+def test_mobile_app_shell_is_served_without_api_auth():
+    server = _Server(["--api-key", "secret"])
+    try:
+        status, headers, page = server.call("GET", "/")
+        assert status == 200 and "Summit AI" in page
+        assert "Ask Summit" in page and "Ask Qwen" not in page
+        assert "qwen" not in page.lower()
+        assert 'id="voice-input"' in page and 'id="voice-status"' in page
+        assert "speechRecognition" in page and "speechSynthesis" in page
+        assert headers["Content-Type"].startswith("text/html")
+        for path, content_type in (("/manifest.webmanifest", "application/manifest+json"),
+                                   ("/sw.js", "application/javascript"), ("/icons/icon.svg", "image/svg+xml")):
+            status, headers, body = server.call("GET", path)
+            assert status == 200 and body
+            assert headers["Content-Type"].startswith(content_type)
+            if path == "/sw.js":
+                assert 'const CACHE = "summit-app-v3"' in body
+    finally:
+        server.close()
 
 
 class _FakeBot:
@@ -198,7 +317,8 @@ class _Server:
     def __init__(self, extra=(), tmp=None):
         import serve
         self.tmp = tmp or tempfile.mkdtemp(); _tiny_assistant(self.tmp)
-        a = serve.parse_args(["--ckpt", self.tmp + "/ck", "--memory", self.tmp + "/mem", "--data", self.tmp + "/nodata", "--port", "0", *extra])
+        a = serve.parse_args(["--ckpt", self.tmp + "/ck", "--memory", self.tmp + "/mem", "--data", self.tmp + "/nodata",
+                              "--port", "0", "--backend", "none", *extra])
         self.srv = serve.build_server(a); self.port = self.srv.server_address[1]
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
 

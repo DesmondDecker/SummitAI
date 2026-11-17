@@ -1,0 +1,7 @@
+.venv/
+.venv-qwen/
+__pycache__/
+*.py[cod]
+models/
+outputs/
+memory/*.jsonl

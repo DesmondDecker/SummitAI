@@ -1,7 +1,8 @@
 """Optional escalation to a large language model for questions the small local model cannot handle.
 OFF by default. Sending user text to an external service is a privacy decision: enable it deliberately,
 tell users, and read the provider's data terms."""
-import json, os, urllib.request
+import json, os, urllib.error, urllib.request
+from urllib.parse import urlsplit
 
 
 class BackendError(Exception):
@@ -56,3 +57,70 @@ class AnthropicBackend(Backend):
             return "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
         except Exception as e:                                 # network, HTTP error, bad JSON: never crash the caller
             raise BackendError(f"{type(e).__name__}: {e}") from e
+
+
+class LocalQwenBackend(Backend):
+    """Runs Summit's local Qwen checkpoint and optional local LoRA adapter."""
+    name = "qwen-local"
+    answer_all = True
+
+    def __init__(self, model_path, adapter_path=None, device="auto"):
+        from .qwen_runtime import QwenRuntime
+        try:
+            self.runtime = QwenRuntime(model_path, adapter_path, device)
+        except Exception as exc:
+            raise BackendError(f"cannot load local Qwen model: {exc}") from exc
+
+    def complete(self, messages, system=None, max_tokens=512):
+        try:
+            return self.runtime.respond(messages, system=system, max_new_tokens=max_tokens)
+        except Exception as exc:
+            raise BackendError(f"local Qwen inference failed: {exc}") from exc
+
+
+class OllamaQwenBackend(Backend):
+    """Uses a Qwen model already installed in the local Ollama service."""
+    name = "qwen-ollama"
+    answer_all = True
+    URL = "http://127.0.0.1:11434/api/chat"
+
+    def __init__(self, model=None, timeout=180, url=None):
+        self.model = model or os.environ.get("SUMMIT_QWEN_MODEL", "custom-qwen:latest")
+        self.timeout = timeout
+        self.url = url or self.URL
+        if not self.model.strip():
+            raise BackendError("set SUMMIT_QWEN_MODEL to an installed local Ollama Qwen model")
+        endpoint = urlsplit(self.url)
+        if (endpoint.scheme != "http" or endpoint.hostname not in {"127.0.0.1", "localhost", "::1"}
+                or endpoint.username or endpoint.password):
+            raise BackendError("Qwen Ollama endpoint must use a loopback address")
+        if not 1 <= timeout <= 600:
+            raise ValueError("Ollama timeout must be between 1 and 600 seconds")
+
+    def complete(self, messages, system=None, max_tokens=512):
+        turns = list(messages)
+        if system:
+            turns.insert(0, {"role": "system", "content": system})
+        body = {
+            "model": self.model,
+            "messages": turns,
+            "stream": False,
+            "keep_alive": "10m",
+            "options": {"num_predict": max_tokens},
+        }
+        req = urllib.request.Request(
+            self.url,
+            data=json.dumps(body).encode("utf-8"),
+            method="POST",
+            headers={"content-type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise BackendError(f"local Ollama Qwen request failed: {type(exc).__name__}: {exc}") from exc
+        message = data.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, str) or not content.strip():
+            raise BackendError("local Ollama Qwen returned an empty or invalid response")
+        return content.strip()

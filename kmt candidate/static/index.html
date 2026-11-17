@@ -1,678 +1,644 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Summit AI — Holographic Neural Globe</title>
-  <!-- Load Google Fonts for futuristic technical typography -->
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
-
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#07111f">
+  <meta name="description" content="Summit AI mobile chat with English voice tools.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Summit AI</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="/icons/icon.svg">
   <style>
-    /* ===========================================================================
-       1. DESIGN TOKENS & GLOBAL RESET
-       =========================================================================== */
     :root {
-      --bg-void: #030712;
-      --bg-deep: #061224;
-      --cyan-bright: #00f3ff;
-      --cyan-mid: #00a8cc;
-      --blue-electric: #0066ff;
-      --amber-node: #ffaa00;
-      --glow-cyan: 0 0 12px rgba(0, 243, 255, 0.75), 0 0 28px rgba(0, 168, 204, 0.45);
-      --glow-blue: 0 0 35px rgba(0, 102, 255, 0.55), inset 0 0 35px rgba(0, 243, 255, 0.35);
-      --globe-size: min(54vw, 310px);
-      --hud-outer-size: calc(var(--globe-size) * 1.62);
+      color-scheme: dark;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #07111f;
+      color: #e8f4ff;
+      font-synthesis: none;
+      --panel: rgba(13, 27, 45, .94);
+      --line: rgba(122, 200, 255, .18);
+      --cyan: #62ddff;
+      --muted: #9ab0c7;
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
     }
 
-    *, *::before, *::after {
-      box-sizing: border-box;
+    * { box-sizing: border-box; }
+
+    body {
+      min-width: 320px;
+      min-height: 100vh;
+      min-height: 100dvh;
       margin: 0;
-      padding: 0;
-    }
-
-    html, body {
-      width: 100%;
-      min-height: 100vh;
-      background-color: var(--bg-void);
-      color: var(--cyan-bright);
-      font-family: 'Share Tech Mono', monospace;
-      overflow-x: hidden;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-    }
-
-    /* ===========================================================================
-       2. COMMAND-CENTER BACKGROUND & AMBIENT LIGHTING
-       =========================================================================== */
-    .command-center {
-      position: relative;
-      width: 100%;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 2rem 1rem;
-      background:
-        radial-gradient(circle at 50% 48%, rgba(0, 119, 255, 0.22) 0%, rgba(3, 12, 28, 0.92) 52%, #02050d 100%),
-        linear-gradient(rgba(0, 243, 255, 0.04) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(0, 243, 255, 0.04) 1px, transparent 1px);
-      background-size: 100% 100%, 36px 36px, 36px 36px;
       overflow: hidden;
+      background:
+        radial-gradient(ellipse at 50% -20%, rgba(25, 115, 177, .34), transparent 58%),
+        #07111f;
     }
 
-    /* Subtle CRT / Hologram scanline overlay across the screen */
-    .scanline-overlay {
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      background: repeating-linear-gradient(
-        to bottom,
-        transparent 0px,
-        transparent 3px,
-        rgba(0, 243, 255, 0.025) 4px
-      );
-      z-index: 50;
-    }
+    button, input, select, textarea { font: inherit; }
+    button { touch-action: manipulation; }
 
-    /* Top HUD Header Bar */
-    .top-hud-bar {
-      position: absolute;
-      top: 1.25rem;
-      left: 50%;
-      transform: translateX(-50%);
-      width: min(92%, 960px);
+    .app {
+      width: min(100%, 840px);
+      height: 100vh;
+      height: 100dvh;
+      min-height: 0;
+      margin: 0 auto;
+      padding: max(14px, env(safe-area-inset-top, 0px)) 14px calc(14px + var(--safe-bottom));
       display: flex;
-      justify-content: space-between;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .topbar, .chat-panel {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      box-shadow: 0 18px 55px rgba(0, 0, 0, .24);
+      backdrop-filter: blur(14px);
+    }
+
+    .topbar {
+      display: flex;
       align-items: center;
-      padding: 0.6rem 1.25rem;
-      border: 1px solid rgba(0, 243, 255, 0.28);
-      background: rgba(4, 15, 32, 0.65);
-      backdrop-filter: blur(6px);
-      border-radius: 6px;
-      font-size: 0.78rem;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      z-index: 20;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      border-radius: 18px;
     }
 
-    .top-hud-bar .sys-title {
-      font-family: 'Orbitron', sans-serif;
-      font-weight: 900;
-      font-size: 0.92rem;
-      letter-spacing: 0.18em;
-      color: #ffffff;
-      text-shadow: 0 0 12px var(--cyan-bright), 0 0 24px rgba(0, 102, 255, 0.8);
-    }
+    .brand { display: flex; align-items: center; gap: 11px; min-width: 0; }
+    .brand img { width: 40px; height: 40px; flex: none; }
+    h1 { margin: 0; font-size: 1.05rem; letter-spacing: .12em; }
+    .subtitle { margin-top: 3px; color: var(--muted); font-size: .77rem; }
 
-    /* Prominent Holographic Core Nameplate centered below/across the globe */
-    .summit-core-brand {
-      position: absolute;
-      bottom: 13%;
-      left: 50%;
-      transform: translateX(-50%);
-      padding: 0.4rem 1.25rem;
-      background: rgba(2, 12, 30, 0.85);
-      border: 1px solid rgba(0, 243, 255, 0.65);
-      border-radius: 999px;
-      box-shadow: 0 0 22px rgba(0, 243, 255, 0.35), inset 0 0 12px rgba(0, 243, 255, 0.25);
-      backdrop-filter: blur(6px);
-      text-align: center;
-      z-index: 25;
-      pointer-events: none;
-      transition: box-shadow 0.4s ease, border-color 0.4s ease, transform 0.4s ease;
-    }
-
-    .summit-core-brand .brand-main {
-      display: block;
-      font-family: 'Orbitron', sans-serif;
-      font-weight: 900;
-      font-size: clamp(0.95rem, 2.4vw, 1.35rem);
-      letter-spacing: 0.24em;
-      color: #ffffff;
-      text-shadow: 0 0 10px var(--cyan-bright), 0 0 22px var(--blue-electric);
-    }
-
-    .summit-core-brand .brand-sub {
-      display: block;
-      font-size: 0.62rem;
-      letter-spacing: 0.2em;
-      color: var(--cyan-bright);
-      opacity: 0.9;
-      margin-top: 2px;
-    }
-
-    .holo-stage:hover .summit-core-brand {
-      border-color: #ffffff;
-      box-shadow: 0 0 32px rgba(0, 243, 255, 0.75), inset 0 0 18px rgba(0, 243, 255, 0.45);
-      transform: translateX(-50%) scale(1.05);
-    }
-
-    .status-pill {
+    .connection {
       display: inline-flex;
       align-items: center;
-      gap: 0.45rem;
-      color: var(--cyan-bright);
+      justify-content: flex-end;
+      gap: 7px;
+      color: var(--muted);
+      font-size: .78rem;
+      text-align: right;
+    }
+    .connection-dot { width: 8px; height: 8px; border-radius: 50%; background: #f0ad55; }
+    .connection[data-state="online"] { color: #b6f3d4; }
+    .connection[data-state="online"] .connection-dot { background: #55e19b; }
+    .connection[data-state="offline"] { color: #ffb4a9; }
+    .connection[data-state="offline"] .connection-dot { background: #ff7467; }
+
+    .chat-panel {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      border-radius: 20px;
     }
 
-    .status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--cyan-bright);
-      box-shadow: 0 0 10px var(--cyan-bright);
-      animation: pulseBlink 1.5s infinite ease-in-out;
-    }
-
-    /* ===========================================================================
-       3. HOLOGRAPHIC STAGE & INTERACTIVE HOVER CONTROLS
-       =========================================================================== */
-    .holo-stage {
-      position: relative;
-      width: var(--hud-outer-size);
-      height: var(--hud-outer-size);
-      max-width: 92vw;
-      max-height: 92vw;
+    .panel-heading {
       display: flex;
       align-items: center;
-      justify-content: center;
-      perspective: 1100px;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 15px 18px;
+      border-bottom: 1px solid var(--line);
+    }
+    .panel-heading h2 { margin: 0; font-size: .98rem; }
+    .subtle-button {
+      border: 0;
+      padding: 7px 9px;
+      color: var(--muted);
+      background: transparent;
       cursor: pointer;
-      transition: transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    .subtle-button:hover { color: #fff; }
+
+    .messages {
+      flex: 1;
+      min-height: 180px;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      padding: 18px;
+      scroll-behavior: smooth;
     }
 
-    /* Interactive CSS Hover State: Intensify glow & pause core rotation for inspection */
-    .holo-stage:hover {
-      transform: scale(1.03);
+    .welcome {
+      max-width: 520px;
+      margin: min(10vh, 70px) auto;
+      color: var(--muted);
+      text-align: center;
+      line-height: 1.6;
+    }
+    .welcome strong { display: block; margin-bottom: 8px; color: #e8f4ff; font-size: 1.12rem; }
+
+    .message {
+      width: fit-content;
+      max-width: min(88%, 620px);
+      margin: 0 0 14px;
+      padding: 11px 14px;
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      background: #10243a;
+      line-height: 1.5;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+    }
+    .message.user { margin-left: auto; border-color: rgba(98, 221, 255, .3); background: #123b55; }
+    .message.error { border-color: rgba(255, 116, 103, .5); color: #ffd2cc; }
+    .message-meta { display: block; margin-top: 5px; color: var(--muted); font-size: .7rem; }
+    .message.pending::after { content: "..."; animation: thinking 1s steps(4, end) infinite; }
+    @keyframes thinking {
+      0% { opacity: .2; }
+      50% { opacity: 1; }
+      100% { opacity: .2; }
     }
 
-    .holo-stage:hover .globe-sphere {
-      animation-play-state: paused;
-    }
-
-    .holo-stage:hover .globe-core-glow {
-      box-shadow:
-        0 0 65px rgba(0, 243, 255, 0.75),
-        0 0 120px rgba(0, 102, 255, 0.65),
-        inset 0 0 55px rgba(0, 243, 255, 0.65);
-    }
-
-    .holo-stage:hover .hud-ring-outer {
-      border-color: rgba(0, 243, 255, 0.85);
-      box-shadow: 0 0 25px rgba(0, 243, 255, 0.4);
-    }
-
-    /* ===========================================================================
-       4. CONCENTRIC OUTER ORBITAL HUD RINGS (GIMBAL FRAMES)
-       =========================================================================== */
-    .hud-ring {
-      position: absolute;
-      border-radius: 50%;
-      pointer-events: none;
-    }
-
-    /* Outermost heavy cybernetic gimbal frame */
-    .hud-ring-outer {
-      width: 100%;
-      height: 100%;
-      border: 2px solid rgba(0, 243, 255, 0.32);
-      box-shadow:
-        0 0 30px rgba(0, 102, 255, 0.25),
-        inset 0 0 30px rgba(0, 243, 255, 0.15);
-      animation: spinClockwise 48s linear infinite;
-      transition: border-color 0.4s ease, box-shadow 0.4s ease;
-    }
-
-    /* Tech notches & glowing orbital nodes on outer gimbal */
-    .hud-ring-outer::before,
-    .hud-ring-outer::after {
-      content: '';
-      position: absolute;
-      width: 12px;
-      height: 12px;
-      border-radius: 50%;
-      background: var(--cyan-bright);
-      box-shadow: 0 0 14px var(--cyan-bright), 0 0 24px #ffffff;
-    }
-
-    .hud-ring-outer::before {
-      top: -6px;
-      left: 50%;
-      transform: translateX(-50%);
-    }
-
-    .hud-ring-outer::after {
-      bottom: -6px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: var(--amber-node);
-      box-shadow: 0 0 14px var(--amber-node);
-    }
-
-    /* Dashed telemetry ring rotating counter-clockwise */
-    .hud-ring-dashed {
-      width: 89%;
-      height: 89%;
-      border: 2px dashed rgba(0, 243, 255, 0.52);
-      animation: spinCounterClockwise 32s linear infinite;
-    }
-
-    /* Segmented arc ring using conic-gradient mask */
-    .hud-ring-arcs {
-      width: 81%;
-      height: 81%;
-      border: 4px solid transparent;
-      border-top-color: var(--cyan-bright);
-      border-bottom-color: var(--blue-electric);
-      filter: drop-shadow(0 0 8px rgba(0, 243, 255, 0.7));
-      animation: spinClockwise 18s linear infinite;
-    }
-
-    /* Tilted 3D equatorial satellite orbit track */
-    .orbital-track-3d {
-      position: absolute;
-      width: 94%;
-      height: 94%;
-      border-radius: 50%;
-      border: 1px solid rgba(0, 243, 255, 0.45);
-      transform: rotateX(72deg) rotateY(-14deg);
-      transform-style: preserve-3d;
-      box-shadow: 0 0 16px rgba(0, 243, 255, 0.25);
-    }
-
-    /* Glowing data packet traveling along the tilted orbit */
-    .orbital-satellite {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      width: 100%;
-      height: 100%;
-      transform: translate(-50%, -50%);
-      animation: spinClockwise 9s linear infinite;
-    }
-
-    .orbital-satellite::before {
-      content: '';
-      position: absolute;
-      top: -5px;
-      left: 50%;
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: #ffffff;
-      box-shadow:
-        0 0 10px #ffffff,
-        0 0 20px var(--cyan-bright),
-        0 0 32px var(--blue-electric);
-    }
-
-    /* ===========================================================================
-       5. CSS 3D WIREFRAME GLOBE (PRESERVE-3D)
-       =========================================================================== */
-    .globe-wrapper {
-      position: relative;
-      width: var(--globe-size);
-      height: var(--globe-size);
+    .composer-wrap { padding: 12px 14px 14px; border-top: 1px solid var(--line); }
+    .controls {
       display: flex;
       align-items: center;
-      justify-content: center;
-      transform-style: preserve-3d;
-      /* Axial tilt like Earth (23.5 deg) */
-      transform: rotateZ(-18deg) rotateX(12deg);
+      gap: 9px;
+      margin-bottom: 10px;
     }
-
-    /* Volumetric holographic plasma core & radar sweep */
-    .globe-core-glow {
-      position: absolute;
-      inset: 0;
-      border-radius: 50%;
-      background:
-        radial-gradient(circle at 35% 30%, rgba(0, 243, 255, 0.45) 0%, rgba(0, 102, 255, 0.28) 45%, rgba(2, 12, 34, 0.88) 100%);
-      box-shadow:
-        0 0 45px rgba(0, 168, 255, 0.55),
-        inset 0 0 40px rgba(0, 243, 255, 0.45);
-      overflow: hidden;
-      transition: box-shadow 0.4s ease;
+    select, .key-input, textarea {
+      color: #e8f4ff;
+      border: 1px solid var(--line);
+      background: #091829;
+      outline: none;
     }
+    select { min-height: 40px; padding: 0 10px; border-radius: 10px; }
+    select:focus, .key-input:focus, textarea:focus { border-color: var(--cyan); }
+    .translation-controls { display: flex; gap: 7px; }
 
-    /* Simulated glowing cyber‑continent matrix dots inside the core */
-    .globe-core-glow::before {
-      content: '';
-      position: absolute;
-      inset: -20%;
-      background-image:
-        radial-gradient(rgba(0, 243, 255, 0.65) 1.2px, transparent 1.2px),
-        radial-gradient(rgba(255, 196, 0, 0.7) 1.5px, transparent 1.5px);
-      background-size: 14px 14px, 42px 42px;
-      background-position: 0 0, 11px 17px;
-      opacity: 0.42;
-      animation: driftTexture 24s linear infinite;
+    .composer {
+      display: flex;
+      align-items: flex-end;
+      gap: 9px;
     }
-
-    /* Vertical pulsing radar scanline sweeping across the sphere */
-    .globe-radar-sweep {
-      position: absolute;
-      inset: 0;
-      border-radius: 50%;
-      overflow: hidden;
-      pointer-events: none;
+    textarea {
+      flex: 1;
+      min-width: 0;
+      min-height: 48px;
+      max-height: 180px;
+      resize: vertical;
+      padding: 13px 14px;
+      border-radius: 14px;
+      line-height: 1.4;
     }
-
-    .globe-radar-sweep::after {
-      content: '';
-      position: absolute;
-      left: 0;
-      right: 0;
-      height: 22%;
-      background: linear-gradient(
-        to bottom,
-        transparent,
-        rgba(0, 243, 255, 0.45),
-        rgba(255, 255, 255, 0.85),
-        transparent
-      );
-      animation: radarScanVertical 4.2s ease-in-out infinite;
-    }
-
-    /* Rotating 3D Wireframe Sphere Container */
-    .globe-sphere {
-      position: relative;
-      width: 100%;
-      height: 100%;
-      transform-style: preserve-3d;
-      animation: rotateGlobe3D 16s linear infinite;
-    }
-
-    /* Shared wireframe ring style */
-    .wire-ring {
-      position: absolute;
-      inset: 0;
-      border-radius: 50%;
-      border: 1px solid rgba(0, 243, 255, 0.48);
-      box-shadow: inset 0 0 8px rgba(0, 243, 255, 0.16);
-      transform-style: preserve-3d;
-    }
-
-    /* Longitude Meridians (rotated around Y axis at 30-degree intervals) */
-    .meridian-1 { transform: rotateY(0deg); }
-    .meridian-2 { transform: rotateY(30deg); }
-    .meridian-3 { transform: rotateY(60deg); }
-    .meridian-4 { transform: rotateY(90deg); border-color: rgba(0, 243, 255, 0.8); }
-    .meridian-5 { transform: rotateY(120deg); }
-    .meridian-6 { transform: rotateY(150deg); }
-
-    /* Latitude Parallels (rotated 90deg on X, translated along Z, scaled by cos(lat)) */
-    .latitude-equator {
-      transform: rotateX(90deg) translateZ(0px) scale(1);
-      border: 1.5px solid rgba(0, 243, 255, 0.9);
-      box-shadow: 0 0 12px rgba(0, 243, 255, 0.65);
-    }
-
-    .latitude-n1 {
-      transform: rotateX(90deg) translateZ(calc(var(--globe-size) * 0.25)) scale(0.866);
-    }
-
-    .latitude-n2 {
-      transform: rotateX(90deg) translateZ(calc(var(--globe-size) * 0.433)) scale(0.5);
-      border-style: dashed;
-    }
-
-    .latitude-s1 {
-      transform: rotateX(90deg) translateZ(calc(var(--globe-size) * -0.25)) scale(0.866);
-    }
-
-    .latitude-s2 {
-      transform: rotateX(90deg) translateZ(calc(var(--globe-size) * -0.433)) scale(0.5);
-      border-style: dashed;
-    }
-
-    /* Glowing Data Hub Nodes anchored on the 3D Sphere */
-    .globe-node {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      width: 9px;
-      height: 9px;
-      margin: -4.5px 0 0 -4.5px;
-      border-radius: 50%;
-      background: #ffffff;
-      box-shadow: 0 0 8px #fff, 0 0 16px var(--cyan-bright), 0 0 26px var(--cyan-bright);
-      transform-style: preserve-3d;
-    }
-
-    .node-eu { transform: rotateY(25deg) rotateX(42deg) translateZ(calc(var(--globe-size) * 0.5)); }
-    .node-na { transform: rotateY(-75deg) rotateX(34deg) translateZ(calc(var(--globe-size) * 0.5)); }
-    .node-as { transform: rotateY(115deg) rotateX(22deg) translateZ(calc(var(--globe-size) * 0.5)); background: var(--amber-node); box-shadow: 0 0 10px var(--amber-node), 0 0 20px var(--amber-node); }
-    .node-af { transform: rotateY(18deg) rotateX(-8deg) translateZ(calc(var(--globe-size) * 0.5)); }
-
-    /* ===========================================================================
-       6. FLOATING HOLOGRAPHIC TELEMETRY CALL OUT BADGES
-       =========================================================================== */
-    .telemetry-badge {
-      position: absolute;
-      padding: 0.45rem 0.75rem;
-      background: rgba(3, 16, 36, 0.82);
-      border: 1px solid rgba(0, 243, 255, 0.55);
-      border-left: 3px solid var(--cyan-bright);
-      border-radius: 4px;
-      box-shadow: 0 0 18px rgba(0, 243, 255, 0.22);
-      backdrop-filter: blur(4px);
-      font-size: 0.72rem;
-      line-height: 1.35;
-      letter-spacing: 0.08em;
-      color: #e0fbff;
-      white-space: nowrap;
-      z-index: 15;
-      transition: transform 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
-    }
-
-    .telemetry-badge:hover {
-      transform: translateY(-3px) scale(1.04);
-      border-color: #ffffff;
-      box-shadow: 0 0 24px rgba(0, 243, 255, 0.55);
-    }
-
-    .telemetry-badge .badge-label {
-      display: block;
-      font-family: 'Orbitron', sans-serif;
+    .send-button, .install-button {
+      min-height: 48px;
+      border: 1px solid rgba(98, 221, 255, .42);
+      border-radius: 13px;
+      color: #04121e;
+      background: var(--cyan);
       font-weight: 700;
-      font-size: 0.68rem;
-      color: var(--cyan-bright);
-      text-shadow: 0 0 8px rgba(0, 243, 255, 0.6);
+      cursor: pointer;
+    }
+    .voice-button, .speak-button {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      color: #e8f4ff;
+      background: #10243a;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .voice-button { min-width: 52px; min-height: 48px; padding: 0 9px; }
+    .voice-button.listening { border-color: #ff7467; color: #ffd2cc; }
+    .voice-button:disabled { opacity: .56; cursor: not-allowed; }
+    .speak-button { display: block; min-height: 32px; margin-top: 7px; padding: 0 9px; font-size: .75rem; }
+    .send-button { min-width: 76px; padding: 0 16px; }
+    .install-button { min-height: 36px; padding: 0 11px; font-size: .8rem; }
+    .send-button:disabled { opacity: .56; cursor: wait; }
+    .hint { margin: 8px 2px 0; color: var(--muted); font-size: .72rem; }
+
+    details.settings { color: var(--muted); font-size: .78rem; }
+    details.settings summary { width: fit-content; cursor: pointer; }
+    .key-row { display: flex; gap: 8px; max-width: 440px; margin-top: 9px; }
+    .key-input { flex: 1; min-width: 0; padding: 9px 10px; border-radius: 9px; }
+
+    @media (max-width: 520px) {
+      .app { gap: 10px; padding-right: 9px; padding-left: 9px; }
+      .topbar { padding: 11px 12px; }
+      .brand img { width: 35px; height: 35px; }
+      h1 { font-size: .92rem; }
+      .subtitle { font-size: .7rem; }
+      .connection { max-width: 112px; font-size: .68rem; }
+      .panel-heading { padding: 12px 14px; }
+      .messages { min-height: 0; padding: 14px 11px; }
+      .message { max-width: 94%; }
+      .composer-wrap { padding: 10px 9px calc(10px + var(--safe-bottom)); }
+      .controls { flex-wrap: wrap; }
+      .translation-controls { margin-left: auto; }
+      select { min-height: 38px; font-size: .82rem; }
+      .send-button { min-width: 62px; padding: 0 11px; }
+      .voice-button { min-width: 46px; padding: 0 6px; }
     }
 
-    .telemetry-badge .badge-value {
-      color: #a5d8ff;
-      font-size: 0.68rem;
+    @media (max-height: 520px) {
+      .app { gap: 8px; padding-top: max(8px, env(safe-area-inset-top, 0px)); padding-bottom: calc(8px + var(--safe-bottom)); }
+      .topbar { padding-top: 8px; padding-bottom: 8px; }
+      .brand img { width: 30px; height: 30px; }
+      .panel-heading { padding-top: 8px; padding-bottom: 8px; }
+      .messages { min-height: 0; padding-top: 8px; padding-bottom: 8px; }
+      .composer-wrap { padding-top: 7px; padding-bottom: 7px; }
+      .controls { margin-bottom: 6px; }
+      select { min-height: 34px; }
+      textarea { min-height: 40px; max-height: 120px; padding-top: 9px; padding-bottom: 9px; }
+      .send-button, .voice-button { min-height: 40px; }
+      .hint { display: none; }
     }
 
-    .telemetry-badge::after {
-      content: '';
-      position: absolute;
-      width: 24px;
-      height: 1px;
-      background: linear-gradient(90deg, var(--cyan-bright), transparent);
-      top: 50%;
-    }
-
-    .badge-hubs { top: 6%; right: 2%; animation: floatSlow 5s ease-in-out infinite; }
-    .badge-hubs::after { right: 100%; background: linear-gradient(270deg, var(--cyan-bright), transparent); }
-    .badge-cloud { top: 23%; right: -8%; animation: floatSlow 6s ease-in-out infinite 0.8s; }
-    .badge-cloud::after { right: 100%; background: linear-gradient(270deg, var(--cyan-bright), transparent); }
-    .badge-network { top: 28%; left: -10%; border-left: 1px solid rgba(0, 243, 255, 0.55); border-right: 3px solid var(--cyan-bright); animation: floatSlow 5.5s ease-in-out infinite 0.4s; }
-    .badge-network::after { left: 100%; }
-    .badge-latency { bottom: 12%; left: -4%; border-left: 1px solid rgba(0, 243, 255, 0.55); border-right: 3px solid var(--amber-node); animation: floatSlow 6.2s ease-in-out infinite 1.2s; }
-    .badge-latency::after { left: 100%; }
-    .badge-uplink { bottom: 10%; right: -2%; animation: floatSlow 5.8s ease-in-out infinite 1.6s; }
-    .badge-uplink::after { right: 100%; background: linear-gradient(270deg, var(--cyan-bright), transparent); }
-
-    /* ===========================================================================
-       7. PROJECTOR PEDESTAL BASE (BOTTOM HOLOGRAPHIC EMITTER)
-       =========================================================================== */
-    .projector-base {
-      position: relative;
-      width: calc(var(--globe-size) * 1.15);
-      height: 36px;
-      margin-top: -12px;
-      border-radius: 50%;
-      background: radial-gradient(ellipse at center, rgba(0, 243, 255, 0.45) 0%, rgba(0, 102, 255, 0.15) 55%, transparent 75%);
-      border: 1px solid rgba(0, 243, 255, 0.4);
-      box-shadow: 0 0 30px rgba(0, 243, 255, 0.35);
-      transform: rotateX(68deg);
-    }
-
-    .projector-beam {
-      width: calc(var(--globe-size) * 0.72);
-      height: 44px;
-      margin-top: -28px;
-      background: linear-gradient(to top, rgba(0, 243, 255, 0.28), transparent);
-      clip-path: polygon(18% 100%, 82% 100%, 100% 0%, 0% 0%);
-      pointer-events: none;
-    }
-
-    .interaction-hint {
-      margin-top: 1.25rem;
-      font-size: 0.75rem;
-      letter-spacing: 0.16em;
-      text-transform: uppercase;
-      color: rgba(165, 216, 255, 0.75);
-      text-align: center;
-    }
-
-    /* ===========================================================================
-       8. KEYFRAME ANIMATIONS
-       =========================================================================== */
-    @keyframes rotateGlobe3D { 0% { transform: rotateY(0deg); } 100% { transform: rotateY(360deg); } }
-    @keyframes spinClockwise { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-    @keyframes spinCounterClockwise { 0% { transform: rotate(360deg); } 100% { transform: rotate(0deg); } }
-    @keyframes radarScanVertical { 0%,100% { top:-22%; opacity:0.2; } 50% { top:100%; opacity:0.9; } }
-    @keyframes driftTexture { 0% { transform: translateX(0); } 100% { transform: translateX(-42px); } }
-    @keyframes floatSlow { 0%,100% { transform: translateY(0px); } 50% { transform: translateY(-6px); } }
-    @keyframes pulseBlink { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:0.35; transform:scale(0.8); } }
-
-    /* ===========================================================================
-       9. RESPONSIVE ADAPTATIONS FOR MOBILE SCREENS
-       =========================================================================== */
-    @media (max-width: 640px) {
-      :root { --globe-size: 56vw; --hud-outer-size: 88vw; }
-      .top-hud-bar { font-size:0.65rem; padding:0.5rem 0.75rem; }
-      .top-hud-bar .sys-title { font-size:0.72rem; letter-spacing:0.12em; }
-      .summit-core-brand { bottom:15%; padding:0.3rem 0.9rem; }
-      .telemetry-badge { padding:0.3rem 0.5rem; font-size:0.6rem; }
-      .telemetry-badge .badge-label, .telemetry-badge .badge-value { font-size:0.58rem; }
-      .telemetry-badge::after { display:none; }
-      .badge-hubs { top:-4%; right:0; }
-      .badge-cloud { top:14%; right:-2%; }
-      .badge-network { top:14%; left:-2%; }
-      .badge-latency { bottom:2%; left:0; }
-      .badge-uplink { bottom:2%; right:0; }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; }
     }
   </style>
 </head>
 <body>
-  <!-- Subtle holographic scanline screen effect -->
-  <div class="scanline-overlay" aria-hidden="true"></div>
-
-  <!-- Play intro voice automatically -->
-  <audio autoplay src="/intro.wav"></audio>
-
-  <main class="command-center">
-    <!-- Top Command Center Status Header -->
-    <header class="top-hud-bar">
-      <span class="sys-title">SUMMIT AI // ORBITAL CORE</span>
-      <span class="status-pill">
-        <span class="status-dot"></span>
-        <span>NEURAL GRID — 99.98%</span>
-      </span>
-    </header>
-
-    <!-- Main Interactive Holographic Stage -->
-    <section class="holo-stage" aria-label="Summit AI Interactive 3D Holographic Globe">
-      <!-- Outer Concentric Gimbal & HUD Rings -->
-      <div class="hud-ring hud-ring-outer"></div>
-      <div class="hud-ring hud-ring-dashed"></div>
-      <div class="hud-ring hud-ring-arcs"></div>
-
-      <!-- Tilted 3D Orbital Satellite Track -->
-      <div class="orbital-track-3d">
-        <div class="orbital-satellite"></div>
-      </div>
-
-      <!-- 3D Wireframe Globe Assembly -->
-      <div class="globe-wrapper">
-        <!-- Glowing Volumetric Sphere Core -->
-        <div class="globe-core-glow"></div>
-
-        <!-- Pulsing Radar Scanline -->
-        <div class="globe-radar-sweep"></div>
-
-        <!-- CSS preserve-3d Rotating Latitude & Longitude Rings -->
-        <div class="globe-sphere">
-          <!-- Longitude Meridians -->
-          <div class="wire-ring meridian-1"></div>
-          <div class="wire-ring meridian-2"></div>
-          <div class="wire-ring meridian-3"></div>
-          <div class="wire-ring meridian-4"></div>
-          <div class="wire-ring meridian-5"></div>
-          <div class="wire-ring meridian-6"></div>
-
-          <!-- Latitude Parallels -->
-          <div class="wire-ring latitude-equator"></div>
-          <div class="wire-ring latitude-n1"></div>
-          <div class="wire-ring latitude-n2"></div>
-          <div class="wire-ring latitude-s1"></div>
-          <div class="wire-ring latitude-s2"></div>
-
-          <!-- Active 3D Network Hub Nodes -->
-          <span class="globe-node node-eu" title="Summit AI European Core Hub"></span>
-          <span class="globe-node node-na" title="Summit AI North American Relay"></span>
-          <span class="globe-node node-as" title="Summit AI Asia-Pacific Node"></span>
-          <span class="globe-node node-af" title="Summit AI West Africa Gateway"></span>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <img src="/icons/icon.svg" alt="">
+        <div>
+          <h1>SUMMIT AI</h1>
+          <div class="subtitle">Mobile chat for your Summit server</div>
         </div>
       </div>
-
-      <!-- Prominent Summit AI Holographic Core Nameplate -->
-      <div class="summit-core-brand">
-        <span class="brand-main">SUMMIT AI</span>
-        <span class="brand-sub">GLOBAL NEURAL INTELLIGENCE</span>
+      <div class="connection" id="connection" data-state="checking" role="status" aria-live="polite">
+        <span class="connection-dot" aria-hidden="true"></span>
+        <span id="connection-label">Checking service</span>
       </div>
+      <button class="install-button" id="install" type="button" hidden>Install</button>
+    </header>
 
-      <!-- Floating Holographic Telemetry Callout Badges -->
-      <aside class="telemetry-badge badge-hubs">
-        <span class="badge-label">NETWORK HUBS</span>
-        <span class="badge-value">248 ROUTERS SYNCED</span>
-      </aside>
+    <main class="chat-panel">
+      <div class="panel-heading">
+        <h2>Conversation</h2>
+        <button class="subtle-button" id="clear" type="button">New chat</button>
+      </div>
+      <div class="messages" id="messages" role="log" aria-live="polite" aria-relevant="additions text">
+        <div class="welcome" id="welcome">
+          <strong>What can I help with?</strong>
+          Messages are sent to this server. Chat uses its configured backend; translation and language identification use KMT.
+        </div>
+      </div>
+      <div class="composer-wrap">
+        <div class="controls">
+          <label for="mode">Mode</label>
+          <select id="mode">
+            <option value="auto">Chat with Summit</option>
+            <option value="ask">Ask Summit</option>
+            <option value="translate">Phrasebook translation</option>
+            <option value="identify">Identify language</option>
+          </select>
+          <div class="translation-controls" id="translation-controls" hidden>
+            <select id="source-language" aria-label="Source language">
+              <option value="auto">Detect source</option>
+              <option value="en">English</option>
+              <option value="krio">Krio</option>
+              <option value="mende">Mende</option>
+              <option value="temne">Temne</option>
+            </select>
+            <select id="target-language" aria-label="Target language">
+              <option value="en">English</option>
+              <option value="krio">Krio</option>
+              <option value="mende">Mende</option>
+              <option value="temne">Temne</option>
+            </select>
+          </div>
+        </div>
+        <form id="chat-form">
+          <div class="composer">
+            <textarea id="message-input" name="message" rows="1" maxlength="2000"
+              placeholder="Message Summit..." aria-label="Message Summit" required></textarea>
+            <button class="voice-button" id="voice-input" type="button" aria-label="Start English voice input"
+              title="Start English voice input">Mic</button>
+            <button class="send-button" id="send" type="submit">Send</button>
+          </div>
+        </form>
+        <p class="hint">Enter to send; Shift+Enter for a new line. English dictation uses your browser's speech service; read-aloud uses device voices.</p>
+        <p class="hint voice-status" id="voice-status" role="status" aria-live="polite" hidden></p>
+        <details class="settings">
+          <summary>Connection settings</summary>
+          <label for="api-key">Server API key (optional)</label>
+          <div class="key-row">
+            <input class="key-input" id="api-key" type="password" autocomplete="off" placeholder="Bearer token">
+          </div>
+          <p>Kept only in this browser tab and sent only to this Summit server.</p>
+        </details>
+      </div>
+    </main>
+  </div>
 
-      <aside class="telemetry-badge badge-cloud">
-        <span class="badge-label">CLOUD CORE</span>
-        <span class="badge-value">QUANTUM MESH v4.2</span>
-      </aside>
+  <script>
+    const messages = document.getElementById("messages");
+    const welcome = document.getElementById("welcome");
+    const connection = document.getElementById("connection");
+    const connectionLabel = document.getElementById("connection-label");
+    const form = document.getElementById("chat-form");
+    const input = document.getElementById("message-input");
+    const sendButton = document.getElementById("send");
+    const mode = document.getElementById("mode");
+    const translationControls = document.getElementById("translation-controls");
+    const apiKey = document.getElementById("api-key");
+    const voiceButton = document.getElementById("voice-input");
+    const voiceStatus = document.getElementById("voice-status");
+    const speechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let session = newSessionId();
+    let installPrompt;
+    let activeRequest;
+    let recognition = null;
+    let listening = false;
+    let voiceBase = "";
+    let voiceReceivedResult = false;
+    let activeSpeechButton = null;
 
-      <aside class="telemetry-badge badge-network">
-        <span class="badge-label">GLOBAL DATA STREAM</span>
-        <span class="badge-value">42.8 TB/s // ENCRYPTED</span>
-      </aside>
+    function newSessionId() {
+      return "summit-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 12);
+    }
 
-      <aside class="telemetry-badge badge-latency">
-        <span class="badge-label">LATENCY: 12ms</span>
-        <span class="badge-value">NODES: ACTIVE [100%]</span>
-      </aside>
+    function addMessage(text, role, meta = "") {
+      welcome.hidden = true;
+      const article = document.createElement("article");
+      article.className = "message " + role;
+      article.textContent = text;
+      if (meta) {
+        const detail = document.createElement("span");
+        detail.className = "message-meta";
+        detail.textContent = meta;
+        article.appendChild(detail);
+      }
+      messages.appendChild(article);
+      messages.scrollTop = messages.scrollHeight;
+      return article;
+    }
 
-      <aside class="telemetry-badge badge-uplink">
-        <span class="badge-label">SATELLITE UPLINK</span>
-        <span class="badge-value">ORBIT LOCK: 408 KM</span>
-      </aside>
-    </section>
+    function setVoiceStatus(text) {
+      voiceStatus.textContent = text;
+      voiceStatus.hidden = !text;
+    }
 
-    <!-- Hologram Emitter Pedestal -->
-    <div class="projector-beam" aria-hidden="true"></div>
-    <div class="projector-base" aria-hidden="true"></div>
+    function stopVoiceInput() {
+      if (recognition && listening) recognition.stop();
+    }
 
-    <p class="interaction-hint">Hover over the hologram to lock rotation &amp; amplify field</p>
-  </main>
+    function stopSpeech() {
+      if (activeSpeechButton) {
+        activeSpeechButton.textContent = "Read aloud";
+        activeSpeechButton.setAttribute("aria-label", "Read response aloud");
+      }
+      if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+      activeSpeechButton = null;
+    }
+
+    function addReadAloudButton(article, text) {
+      if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) return;
+      const button = document.createElement("button");
+      button.className = "speak-button";
+      button.type = "button";
+      button.textContent = "Read aloud";
+      button.setAttribute("aria-label", "Read response aloud");
+      button.addEventListener("click", () => {
+        if (activeSpeechButton === button && window.speechSynthesis.speaking) {
+          stopSpeech();
+          button.textContent = "Read aloud";
+          button.setAttribute("aria-label", "Read response aloud");
+          return;
+        }
+        stopVoiceInput();
+        stopSpeech();
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = "en-US";
+        activeSpeechButton = button;
+        button.textContent = "Stop reading";
+        button.setAttribute("aria-label", "Stop reading response");
+        utterance.onend = () => {
+          if (activeSpeechButton === button) {
+            activeSpeechButton = null;
+            button.textContent = "Read aloud";
+            button.setAttribute("aria-label", "Read response aloud");
+          }
+        };
+        utterance.onerror = () => {
+          if (activeSpeechButton === button) {
+            activeSpeechButton = null;
+            button.textContent = "Read aloud";
+            button.setAttribute("aria-label", "Read response aloud");
+            setVoiceStatus("Speech output could not be played on this device.");
+          }
+        };
+        window.speechSynthesis.speak(utterance);
+      });
+      article.appendChild(button);
+    }
+
+    if (speechRecognition) {
+      recognition = new speechRecognition();
+      recognition.lang = "en-US";
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.maxAlternatives = 1;
+      recognition.onstart = () => {
+        listening = true;
+        voiceReceivedResult = false;
+        voiceButton.classList.add("listening");
+        voiceButton.textContent = "Stop";
+        voiceButton.setAttribute("aria-label", "Stop English voice input");
+        setVoiceStatus("Listening in English...");
+      };
+      recognition.onresult = event => {
+        let transcript = "";
+        let finalResult = false;
+        for (let i = 0; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript;
+          finalResult = finalResult || event.results[i].isFinal;
+        }
+        if (!transcript) return;
+        voiceReceivedResult = true;
+        input.value = voiceBase + (voiceBase && !/\s$/.test(voiceBase) ? " " : "") + transcript.trimStart();
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        setVoiceStatus(finalResult ? "Dictation ready. Review it, then send." : "Listening in English...");
+      };
+      recognition.onerror = event => {
+        const errors = {
+          "not-allowed": "Microphone permission was denied. Allow microphone access and try again.",
+          "service-not-allowed": "The browser speech service is unavailable.",
+          "no-speech": "No speech was detected. Try again.",
+          network: "The browser speech service could not be reached."
+        };
+        setVoiceStatus(errors[event.error] || "English voice input failed. Please try again.");
+      };
+      recognition.onend = () => {
+        listening = false;
+        voiceButton.classList.remove("listening");
+        voiceButton.textContent = "Mic";
+        voiceButton.setAttribute("aria-label", "Start English voice input");
+        if (!voiceStatus.textContent || voiceStatus.textContent === "Listening in English...") {
+          setVoiceStatus(voiceReceivedResult ? "Dictation ready. Review it, then send." : "Voice input stopped.");
+        }
+      };
+      voiceButton.addEventListener("click", () => {
+        if (listening) {
+          stopVoiceInput();
+          return;
+        }
+        stopSpeech();
+        voiceBase = input.value.trimEnd();
+        voiceReceivedResult = false;
+        setVoiceStatus("Starting English voice input...");
+        try {
+          recognition.start();
+        } catch (error) {
+          setVoiceStatus("Voice input could not start. Check microphone permission and try again.");
+        }
+      });
+    } else {
+      voiceButton.disabled = true;
+      voiceButton.title = "English voice input is not supported in this browser.";
+      setVoiceStatus("English voice input is not supported in this browser.");
+    }
+
+    async function checkService() {
+      try {
+        const response = await fetch("/health", { cache: "no-store" });
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        await response.json();
+        connection.dataset.state = "online";
+        connectionLabel.textContent = "Online · Summit";
+      } catch {
+        connection.dataset.state = "offline";
+        connectionLabel.textContent = "Service unavailable";
+      }
+    }
+
+    mode.addEventListener("change", () => {
+      translationControls.hidden = mode.value !== "translate";
+    });
+
+    document.getElementById("clear").addEventListener("click", () => {
+      stopVoiceInput();
+      stopSpeech();
+      if (activeRequest) {
+        activeRequest.abort();
+        activeRequest = null;
+        sendButton.disabled = false;
+        sendButton.textContent = "Send";
+      }
+      session = newSessionId();
+      messages.replaceChildren(welcome);
+      welcome.hidden = false;
+      input.focus();
+    });
+
+    input.addEventListener("input", () => {
+      input.style.height = "auto";
+      input.style.height = Math.min(input.scrollHeight, 180) + "px";
+    });
+
+    input.addEventListener("keydown", event => {
+      if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+        event.preventDefault();
+        form.requestSubmit();
+      }
+    });
+
+    form.addEventListener("submit", async event => {
+      event.preventDefault();
+      const text = input.value.trim();
+      if (!text || sendButton.disabled) return;
+
+      stopVoiceInput();
+      stopSpeech();
+      addMessage(text, "user");
+      input.value = "";
+      input.style.height = "auto";
+      sendButton.disabled = true;
+      sendButton.textContent = "Wait";
+      const pending = addMessage("Summit is thinking...", "assistant");
+      pending.classList.add("pending");
+      pending.setAttribute("role", "status");
+      pending.setAttribute("aria-busy", "true");
+      const payload = { text, session, task: mode.value };
+      if (mode.value === "translate") {
+        const src = document.getElementById("source-language").value;
+        payload.src = src === "auto" ? undefined : src;
+        payload.tgt = document.getElementById("target-language").value;
+      }
+
+      const headers = { "Content-Type": "application/json" };
+      if (apiKey.value.trim()) headers.Authorization = "Bearer " + apiKey.value.trim();
+      const request = new AbortController();
+      activeRequest = request;
+      const timeout = setTimeout(() => request.abort(), 195_000);
+      try {
+        const response = await fetch("/v1/chat", {
+          method: "POST",
+          headers,
+          body: JSON.stringify(payload),
+          signal: request.signal
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error || "Request failed with status " + response.status);
+        pending.classList.remove("pending");
+        pending.setAttribute("aria-busy", "false");
+        const reply = result.reply || "Summit returned an empty response.";
+        pending.textContent = reply;
+        if (result.source || result.task) {
+          const meta = document.createElement("span");
+          meta.className = "message-meta";
+          const source = result.source && result.source.startsWith("backend:") ? "assistant" : result.source;
+          meta.textContent = [result.task, source].filter(Boolean).join(" · ");
+          pending.appendChild(meta);
+        }
+        addReadAloudButton(pending, reply);
+      } catch (error) {
+        pending.classList.remove("pending");
+        if (error.name !== "AbortError") {
+          pending.classList.add("error");
+          pending.setAttribute("aria-busy", "false");
+          pending.textContent = error.name === "TypeError"
+            ? "Could not reach Summit. Check your connection and try again."
+            : error.message || "Summit could not complete that request. Please try again.";
+        } else if (activeRequest === request) {
+          pending.classList.remove("pending");
+          pending.classList.add("error");
+          pending.setAttribute("aria-busy", "false");
+          pending.textContent = "Summit took too long to respond. Check the server and try again.";
+        }
+      } finally {
+        clearTimeout(timeout);
+        if (activeRequest === request) {
+          activeRequest = null;
+          sendButton.disabled = false;
+          sendButton.textContent = "Send";
+          input.focus();
+          messages.scrollTop = messages.scrollHeight;
+        }
+      }
+    });
+
+    document.getElementById("install").addEventListener("click", async () => {
+      if (!installPrompt) return;
+      installPrompt.prompt();
+      await installPrompt.userChoice;
+      installPrompt = null;
+      document.getElementById("install").hidden = true;
+    });
+
+    window.addEventListener("beforeinstallprompt", event => {
+      event.preventDefault();
+      installPrompt = event;
+      document.getElementById("install").hidden = false;
+    });
+
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch(error => {
+        console.warn("Summit offline app shell could not be installed:", error);
+      });
+    }
+
+    checkService();
+  </script>
 </body>
 </html>
