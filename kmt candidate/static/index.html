@@ -317,7 +317,7 @@
             <button class="send-button" id="send" type="submit">Send</button>
           </div>
         </form>
-        <p class="hint">Enter to send; Shift+Enter for a new line. Voice dictation is processed locally by this Summit server; read-aloud uses device voices.</p>
+        <p class="hint">Enter to send; Shift+Enter for a new line. Pause to finish dictation or tap Stop; choose a microphone in Connection settings.</p>
         <p class="hint voice-status" id="voice-status" role="status" aria-live="polite" hidden></p>
         <details class="settings">
           <summary>Connection settings</summary>
@@ -326,6 +326,11 @@
             <input class="key-input" id="api-key" type="password" autocomplete="off" placeholder="Bearer token">
           </div>
           <p>Kept only in this browser tab and sent only to this Summit server.</p>
+          <label for="microphone-device">Microphone input</label>
+          <select id="microphone-device" aria-label="Microphone input" disabled hidden>
+            <option value="">System default</option>
+          </select>
+          <p>Choose the microphone Summit listens to. The selection applies to the next recording.</p>
         </details>
       </div>
     </main>
@@ -344,6 +349,7 @@
     const apiKey = document.getElementById("api-key");
     const voiceButton = document.getElementById("voice-input");
     const voiceStatus = document.getElementById("voice-status");
+    const microphoneDevice = document.getElementById("microphone-device");
     let session = newSessionId();
     let installPrompt;
     let activeRequest;
@@ -382,6 +388,34 @@
     function setVoiceStatus(text) {
       voiceStatus.textContent = text;
       voiceStatus.hidden = !text;
+    }
+
+    async function refreshMicrophones(activeTrack) {
+      try {
+        const selected = microphoneDevice.value || activeTrack?.getSettings().deviceId || "";
+        const devices = (await navigator.mediaDevices.enumerateDevices())
+          .filter(device => device.kind === "audioinput");
+        microphoneDevice.replaceChildren(new Option("System default", ""));
+        devices.forEach((device, index) => {
+          microphoneDevice.add(new Option(device.label || "Microphone " + (index + 1), device.deviceId));
+        });
+        if ([...microphoneDevice.options].some(option => option.value === selected)) {
+          microphoneDevice.value = selected;
+        }
+        microphoneDevice.disabled = devices.length < 2;
+        microphoneDevice.hidden = devices.length < 2;
+        return activeTrack?.label || microphoneDevice.selectedOptions[0]?.textContent || "system microphone";
+      } catch (error) {
+        console.warn("Summit could not list microphone devices:", error);
+        return activeTrack?.label || "system microphone";
+      }
+    }
+
+    function resetVoiceButton() {
+      voiceButton.classList.remove("listening");
+      voiceButton.disabled = !transcriptionAvailable;
+      voiceButton.textContent = "Mic";
+      voiceButton.setAttribute("aria-label", "Start English voice input");
     }
 
     function releaseMicrophone() {
@@ -433,12 +467,23 @@
       write(36, "data");
       view.setUint32(40, outputLength * 2, true);
       for (let i = 0; i < outputLength; i++) {
-        const position = i * sampleRate / targetRate;
-        const start = Math.floor(position);
-        const fraction = position - start;
-        const first = samples[start] || 0;
-        const second = samples[Math.min(start + 1, samples.length - 1)] || 0;
-        const sample = Math.max(-1, Math.min(1, first + (second - first) * fraction));
+        const start = i * sampleRate / targetRate;
+        const end = (i + 1) * sampleRate / targetRate;
+        let value;
+        if (sampleRate > targetRate) {
+          let sum = 0;
+          for (let j = Math.floor(start); j < Math.ceil(end); j++) {
+            const overlap = Math.max(0, Math.min(end, j + 1) - Math.max(start, j));
+            sum += (samples[j] || 0) * overlap;
+          }
+          value = sum / (end - start);
+        } else {
+          const index = Math.floor(start);
+          const fraction = start - index;
+          value = (samples[index] || 0) +
+            ((samples[Math.min(index + 1, samples.length - 1)] || 0) - (samples[index] || 0)) * fraction;
+        }
+        const sample = Math.max(-1, Math.min(1, value));
         view.setInt16(44 + i * 2, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
       }
       return new Blob([buffer], { type: "audio/wav" });
@@ -453,25 +498,23 @@
         return;
       }
       recording = false;
-      voiceButton.classList.remove("listening");
       voiceButton.textContent = transcribe ? "..." : "Mic";
       voiceButton.setAttribute("aria-label", transcribe
         ? "Transcribing English voice input"
         : "Start English voice input");
+      voiceButton.classList.remove("listening");
       voiceButton.disabled = transcribe;
       const chunks = audioChunks;
       audioChunks = [];
       const contextRate = audioContext?.sampleRate || 16000;
       await releaseMicrophone();
       if (!transcribe) {
-        voiceButton.disabled = !transcriptionAvailable;
+        resetVoiceButton();
         return;
       }
       const sampleCount = chunks.reduce((total, chunk) => total + chunk.length, 0);
       if (sampleCount < contextRate * 0.25) {
-        voiceButton.disabled = false;
-        voiceButton.textContent = "Mic";
-        voiceButton.setAttribute("aria-label", "Start English voice input");
+        resetVoiceButton();
         setVoiceStatus("No microphone audio was captured. Check the microphone and try again.");
         return;
       }
@@ -485,23 +528,23 @@
       try {
         wav = encodeWave(samples, contextRate);
       } catch (error) {
-        voiceButton.disabled = false;
-        voiceButton.textContent = "Mic";
-        voiceButton.setAttribute("aria-label", "Start English voice input");
+        resetVoiceButton();
         setVoiceStatus(error.message);
         return;
       }
       if (wav.size > 512 * 1024) {
-        voiceButton.disabled = false;
-        voiceButton.textContent = "Mic";
-        voiceButton.setAttribute("aria-label", "Start English voice input");
+        resetVoiceButton();
         setVoiceStatus("That recording is too long. Record a shorter phrase and try again.");
         return;
       }
 
       const request = new AbortController();
       activeTranscription = request;
-      const timeout = setTimeout(() => request.abort(), 30_000);
+      let timedOut = false;
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        request.abort();
+      }, 30_000);
       setVoiceStatus("Transcribing locally on this Summit server...");
       try {
         const headers = { "Content-Type": "audio/wav" };
@@ -521,7 +564,9 @@
         input.focus();
         setVoiceStatus("Dictation ready. Review it, then send.");
       } catch (error) {
-        if (error.name !== "AbortError") {
+        if (error.name === "AbortError" && timedOut) {
+          setVoiceStatus("Local transcription took too long. Try a shorter recording and try again.");
+        } else if (error.name !== "AbortError") {
           setVoiceStatus(error.name === "TypeError"
             ? "Could not reach Summit's local speech recognizer. Check the server connection and try again."
             : error.message || "Local transcription failed. Please try again.");
@@ -529,9 +574,7 @@
       } finally {
         clearTimeout(timeout);
         if (activeTranscription === request) activeTranscription = null;
-        voiceButton.disabled = !transcriptionAvailable;
-        voiceButton.textContent = "Mic";
-        voiceButton.setAttribute("aria-label", "Start English voice input");
+        resetVoiceButton();
       }
     }
 
@@ -541,24 +584,75 @@
       voiceBase = input.value.trimEnd();
       setVoiceStatus("Requesting microphone access...");
       try {
+        const audio = {
+          channelCount: { ideal: 1 },
+          echoCancellation: { ideal: true },
+          noiseSuppression: { ideal: true },
+          autoGainControl: { ideal: true }
+        };
+        if (microphoneDevice.value) audio.deviceId = { exact: microphoneDevice.value };
         microphoneStream = await navigator.mediaDevices.getUserMedia({
-          audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+          audio
         });
+        const track = microphoneStream.getAudioTracks()[0];
+        const microphoneName = await refreshMicrophones(track);
         const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-        audioContext = new AudioContextClass({ sampleRate: 16000 });
+        try {
+          audioContext = new AudioContextClass({ sampleRate: 16000 });
+        } catch (error) {
+          if (error.name !== "NotSupportedError") throw error;
+          audioContext = new AudioContextClass();
+        }
         await audioContext.resume();
+        if (audioContext.state !== "running") {
+          throw new Error("Audio is suspended. Keep Summit open and try the microphone again.");
+        }
+        const sampleRate = audioContext.sampleRate;
         audioSource = audioContext.createMediaStreamSource(microphoneStream);
         audioProcessor = audioContext.createScriptProcessor(4096, 1, 1);
         audioMute = audioContext.createGain();
         audioMute.gain.value = 0;
         audioChunks = [];
         let capturedSamples = 0;
+        let elapsedSamples = 0;
+        let noiseFloor = 0.004;
+        let noiseSamples = 0;
+        let speechDetected = false;
+        let quietSamples = 0;
         audioProcessor.onaudioprocess = event => {
           if (!recording) return;
           const data = event.inputBuffer.getChannelData(0);
           audioChunks.push(new Float32Array(data));
           capturedSamples += data.length;
-          if (capturedSamples >= audioContext.sampleRate * 15) {
+          let energy = 0;
+          for (let i = 0; i < data.length; i++) energy += data[i] * data[i];
+          const rms = Math.sqrt(energy / data.length);
+          const threshold = Math.max(0.012, noiseFloor * 2.5);
+          if (!speechDetected) {
+            if (rms > threshold) {
+              speechDetected = true;
+              setVoiceStatus("Speech detected. Pause briefly to finish, or tap Stop.");
+            } else if (noiseSamples < sampleRate * 0.5) {
+              const weight = data.length / (noiseSamples + data.length);
+              noiseFloor += (rms - noiseFloor) * weight;
+              noiseSamples += data.length;
+            } else if (elapsedSamples > sampleRate * 8) {
+              setVoiceStatus("No speech detected. Check your microphone and try again.");
+              void stopVoiceInput(false);
+              return;
+            }
+          } else if (rms < threshold) {
+            quietSamples += data.length;
+          } else {
+            quietSamples = 0;
+          }
+          elapsedSamples += data.length;
+          if (speechDetected && quietSamples >= sampleRate * 1.1) {
+            setVoiceStatus("Speech finished. Transcribing locally...");
+            void stopVoiceInput();
+            return;
+          }
+          if (capturedSamples >= sampleRate * 15) {
             setVoiceStatus("Maximum recording reached. Transcribing locally...");
             void stopVoiceInput();
           }
@@ -567,22 +661,28 @@
         audioProcessor.connect(audioMute);
         audioMute.connect(audioContext.destination);
         recording = true;
+        track.addEventListener("ended", () => {
+          if (recording) {
+            setVoiceStatus("Microphone disconnected. Transcribing what was captured...");
+            void stopVoiceInput();
+          }
+        }, { once: true });
         voiceButton.classList.add("listening");
         voiceButton.textContent = "Stop";
         voiceButton.setAttribute("aria-label", "Stop and transcribe English voice input");
-        setVoiceStatus("Listening in English... Tap Stop when finished (15 seconds maximum).");
+        setVoiceStatus("Listening in English on " + microphoneName +
+          "... Pause to finish automatically, or tap Stop (15 seconds maximum).");
       } catch (error) {
         await releaseMicrophone();
         const messages = {
           NotAllowedError: "Microphone permission was denied. Allow microphone access for Summit and try again.",
           NotFoundError: "No microphone was found on this device.",
           NotReadableError: "The microphone is busy or unavailable. Close other apps using it and try again.",
-          SecurityError: "Microphone access requires HTTPS or localhost."
+          SecurityError: "Microphone access requires HTTPS or localhost.",
+          NotSupportedError: "This device could not start audio capture. Try another microphone or browser."
         };
-        setVoiceStatus(messages[error.name] || "Could not start the microphone. Check its permission and try again.");
-        voiceButton.textContent = "Mic";
-        voiceButton.setAttribute("aria-label", "Start English voice input");
-        voiceButton.disabled = !transcriptionAvailable;
+        setVoiceStatus(messages[error.name] || error.message || "Could not start the microphone. Check its permission and try again.");
+        resetVoiceButton();
       }
     }
 
@@ -590,6 +690,17 @@
       if (recording) void stopVoiceInput();
       else void startVoiceInput();
     });
+
+    microphoneDevice.addEventListener("change", () => {
+      const selected = microphoneDevice.selectedOptions[0]?.textContent || "system default";
+      setVoiceStatus("Selected " + selected + ". It will be used for the next recording.");
+    });
+
+    if (navigator.mediaDevices?.addEventListener) {
+      navigator.mediaDevices.addEventListener("devicechange", () => {
+        if (microphoneDevice.options.length > 1) void refreshMicrophones();
+      });
+    }
 
     window.addEventListener("pagehide", () => {
       void stopVoiceInput(false);

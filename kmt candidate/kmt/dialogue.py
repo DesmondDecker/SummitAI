@@ -15,8 +15,8 @@ _HARD = {"why", "explain", "compare", "plan", "recommend", "should", "difference
 _FOLLOW = re.compile(r"^(?:and |now |also |then )?(?:in|into|to) (krio|mende|temne|english)\s*[?.!]?$", re.I)
 _REMEMBER = re.compile(r"^(?:remember|note)(?: that)?[:,]? (.+)$", re.I)
 SYSTEM = ("You are a helpful assistant for speakers of Krio, Mende, Temne and English. Reply in the user's language "
-          "when you can, otherwise in English. Be concise and correct; say when you are unsure. You never control "
-          "physical devices.")
+          "when you can, otherwise in English. Answer directly in one or two short sentences unless asked for detail. "
+          "Be correct, say when unsure, and never control physical devices.")
 
 
 def is_complex(text):
@@ -116,7 +116,7 @@ class Dialogue:
         if self.backend is not None:                                        # too hard for the local model: escalate
             try:
                 msgs = self._messages(s)
-                reply = self.backend.complete(msgs, system=SYSTEM)
+                reply = self.backend.complete(msgs, system=SYSTEM, max_tokens=96)
                 return self._out(s, reply, "ask", lang=lang, source=f"backend:{self.backend.name}")
             except BackendError:
                 w = "The larger model is unavailable right now."

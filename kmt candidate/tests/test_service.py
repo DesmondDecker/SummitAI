@@ -144,13 +144,18 @@ def test_dialogue_context_and_safety():
 
 def test_qwen_backend_routes_plain_chat():
     with tempfile.TemporaryDirectory() as tmp:
-        backend = MockBackend("Summit response")
+        class RecordingBackend(MockBackend):
+            def complete(self, messages, system=None, max_tokens=512):
+                self.max_tokens = max_tokens
+                return super().complete(messages, system, max_tokens)
+
+        backend = RecordingBackend("Summit response")
         backend.answer_all = True
         dialogue = Dialogue(_tiny_assistant(tmp), backend=backend)
         result = dialogue.respond("Hello Summit", "qwen-session")
         assert result["source"] == "backend:mock"
         assert result["reply"] == "Summit response"
-        assert backend.calls
+        assert backend.calls and backend.max_tokens == 96
 
 
 def test_qwen_default_uses_installed_ollama_model():
@@ -250,6 +255,7 @@ def test_mobile_app_shell_is_served_without_api_auth():
         assert 'id="voice-input"' in page and 'id="voice-status"' in page
         assert "/v1/transcribe" in page and "speechSynthesis" in page
         assert "speechRecognition" not in page
+        assert 'id="microphone-device"' in page and "Pause briefly to finish" in page
         assert headers["Content-Type"].startswith("text/html")
         for path, content_type in (("/manifest.webmanifest", "application/manifest+json"),
                                    ("/sw.js", "application/javascript"), ("/icons/icon.svg", "image/svg+xml")):
@@ -257,7 +263,7 @@ def test_mobile_app_shell_is_served_without_api_auth():
             assert status == 200 and body
             assert headers["Content-Type"].startswith(content_type)
             if path == "/sw.js":
-                assert 'const CACHE = "summit-app-v4"' in body
+                assert 'const CACHE = "summit-app-v5"' in body
     finally:
         server.close()
 
