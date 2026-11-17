@@ -1,5 +1,5 @@
 """Run: python tests/test_service.py   (formats, robot safety, dialogue context, HTTP service)"""
-import csv, http.client, io, json, os, random, sys, tempfile, threading, time
+import csv, http.client, io, json, os, random, sys, tempfile, threading, time, wave
 import xml.etree.ElementTree as ET
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(__file__))
@@ -248,7 +248,8 @@ def test_mobile_app_shell_is_served_without_api_auth():
         assert "Ask Summit" in page and "Ask Qwen" not in page
         assert "qwen" not in page.lower()
         assert 'id="voice-input"' in page and 'id="voice-status"' in page
-        assert "speechRecognition" in page and "speechSynthesis" in page
+        assert "/v1/transcribe" in page and "speechSynthesis" in page
+        assert "speechRecognition" not in page
         assert headers["Content-Type"].startswith("text/html")
         for path, content_type in (("/manifest.webmanifest", "application/manifest+json"),
                                    ("/sw.js", "application/javascript"), ("/icons/icon.svg", "image/svg+xml")):
@@ -256,7 +257,7 @@ def test_mobile_app_shell_is_served_without_api_auth():
             assert status == 200 and body
             assert headers["Content-Type"].startswith(content_type)
             if path == "/sw.js":
-                assert 'const CACHE = "summit-app-v3"' in body
+                assert 'const CACHE = "summit-app-v4"' in body
     finally:
         server.close()
 
@@ -418,6 +419,67 @@ def test_http_robot_requires_auth_and_stop_bypasses_rate_limit():
         assert S.call("POST", "/v1/chat", {"text": "go forward 1 meter", "session": "r"}, H)[0] == 429   # rate limited
         st, _, b = S.call("POST", "/v1/robot/stop", None, H)
         assert st == 200 and json.loads(b)["status"] == "stopped"                                       # stop still works
+    finally:
+        S.close()
+
+
+def _voice_wav(sample_rate=16000, seconds=1):
+    audio = io.BytesIO()
+    with wave.open(audio, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate)
+        wav.writeframes(b"\0\0" * sample_rate * seconds)
+    return audio.getvalue()
+
+
+def test_windows_voice_recognizer_validates_and_decodes_audio():
+    from unittest.mock import patch
+    from kmt.voice import SpeechRecognitionError, WindowsSpeechRecognizer
+    import subprocess
+
+    recognizer = WindowsSpeechRecognizer()
+    recognizer.available = True
+    recognizer.executable = "powershell.exe"
+    completed = subprocess.CompletedProcess([], 0, b'"hello from the mic"\r\n', b"")
+    with patch("kmt.voice.subprocess.run", return_value=completed) as run:
+        assert recognizer.transcribe(_voice_wav()) == "hello from the mic"
+        assert run.call_args.kwargs["timeout"] == 25
+        assert run.call_args.kwargs["input"] == _voice_wav()
+
+    for invalid in (b"not a wav", _voice_wav(sample_rate=8000), _voice_wav(seconds=16)):
+        try:
+            recognizer.transcribe(invalid)
+            raise AssertionError("invalid voice recording accepted")
+        except SpeechRecognitionError:
+            pass
+
+
+def test_http_voice_transcription_checks_auth_and_audio():
+    from kmt.voice import SpeechRecognitionError
+
+    S = _Server(["--api-key", "voice-key"])
+    S.srv.app.voice.available = True
+    S.srv.app.voice.transcribe = lambda audio: "recognized words" if audio == _voice_wav() else "unexpected audio"
+    try:
+        audio = _voice_wav()
+        assert S.call("POST", "/v1/transcribe", raw=audio)[0] == 401
+        headers = {"Authorization": "Bearer voice-key", "Content-Type": "audio/wav"}
+        status, _, body = S.call("POST", "/v1/transcribe", raw=audio, headers=headers)
+        assert status == 200 and json.loads(body) == {
+            "text": "recognized words", "language": "en-US", "source": "local"
+        }
+        assert S.call("POST", "/v1/transcribe", raw=audio, headers={
+            **headers, "Content-Type": "application/octet-stream"
+        })[0] == 415
+        assert S.call("POST", "/v1/transcribe", raw=b"x" * (512 * 1024 + 1), headers=headers)[0] == 413
+
+        def reject_audio(_audio):
+            raise SpeechRecognitionError("bad audio")
+
+        S.srv.app.voice.transcribe = reject_audio
+        status, _, body = S.call("POST", "/v1/transcribe", raw=audio, headers=headers)
+        assert status == 422 and json.loads(body)["error"] == "bad audio"
     finally:
         S.close()
 

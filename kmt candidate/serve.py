@@ -19,6 +19,7 @@ from kmt.dialogue import Dialogue
 from kmt.formats import FORMATS, render
 from kmt.robot import RobotController, SimRobot
 from kmt.session import SessionManager
+from kmt.voice import SpeechRecognitionError, WindowsSpeechRecognizer
 
 
 SID = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
@@ -99,6 +100,8 @@ class App:
             backend = LocalQwenBackend(a.qwen_model, a.qwen_adapter, a.qwen_device)
         self.dialogue = Dialogue(self.bot, robot, backend, SessionManager(a.max_sessions, a.session_ttl), a.max_chars)
         self.robot, self.api_key, self.max_chars, self.max_body = robot, a.api_key, a.max_chars, a.max_body
+        self.voice = WindowsSpeechRecognizer()
+        self.max_audio_bytes = self.voice.max_audio_bytes
         self.accept_corrections, self.pending_path = a.accept_corrections, os.path.join(a.memory, "pending_corrections.jsonl")
         self.cache, self.limiter, self.metrics = LRU(a.cache_size), RateLimiter(a.rate, a.burst), Metrics()
         self.inflight, self.write_lock = threading.BoundedSemaphore(a.max_inflight), threading.Lock()
@@ -211,7 +214,8 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/health" and method == "GET":
                 backend = app.dialogue.backend
                 return self._send(200, dict(status="ok", langs=app.bot.langs, robot=bool(app.robot),
-                                            backend=backend.name if backend else "none"), fmt)
+                                            backend=backend.name if backend else "none",
+                                            voice_input=app.voice.available), fmt)
             if not self._authorized():
                 return self._err(401, "missing or invalid API key", fmt, {"WWW-Authenticate": "Bearer"})
             ok, wait = app.limiter.allow(self.headers.get("Authorization") or self.client_address[0])
@@ -223,6 +227,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not app.robot:
                     return self._err(404, "robot control is not enabled", fmt)
                 return self._send(200, app.robot.emergency_stop("http"), fmt)
+            if path == "/v1/transcribe" and method == "POST":
+                return self._transcribe(fmt)
             if method != "POST" or path not in ("/v1/chat", "/v1/translate", "/v1/identify", "/v1/correct"):
                 return self._err(404, "not found", fmt)
             body = self._body(fmt)
@@ -247,6 +253,31 @@ class Handler(BaseHTTPRequestHandler):
                 pass
         finally:
             app.metrics.record(path if path.startswith(("/v1", "/health", "/metrics")) else "other", self.status, (time.perf_counter() - t0) * 1000)
+
+    def _transcribe(self, fmt):
+        app = self.server.app
+        if not app.voice.available:
+            return self._err(503, "Local English speech recognition is unavailable on this server.", fmt)
+        if self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() != "audio/wav":
+            return self._err(415, "Content-Type must be audio/wav.", fmt)
+        length = self.headers.get("Content-Length")
+        if length is None or not length.isdigit():
+            return self._err(411, "Content-Length required", fmt)
+        if int(length) > app.max_audio_bytes:
+            return self._err(413, "voice recording is too large", fmt)
+        if not app.inflight.acquire(blocking=False):
+            return self._err(503, "server busy, retry shortly", fmt, {"Retry-After": "1"})
+        try:
+            audio = self.rfile.read(int(length))
+            if len(audio) != int(length):
+                return self._err(400, "incomplete voice recording", fmt)
+            try:
+                transcript = app.voice.transcribe(audio)
+            except SpeechRecognitionError as exc:
+                return self._err(422, str(exc), fmt)
+            return self._send(200, dict(text=transcript, language="en-US", source="local"), fmt)
+        finally:
+            app.inflight.release()
 
     def _route(self, path, body, fmt):
         app = self.server.app
